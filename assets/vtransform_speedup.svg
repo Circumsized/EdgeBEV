@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" font-family="'Segoe UI','Microsoft YaHei','PingFang SC','Noto Sans CJK SC','WenQuanYi Micro Hei',Helvetica,Arial,sans-serif">
   <rect width="880" height="420" fill="#ffffff"/>
   <text x="440" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2937">GPU Zero-Copy VTransform 优化（4528 ms → 188.8 ms，−96%）</text>
   <text x="440" y="56" text-anchor="middle" font-size="12" fill="#6b7280">各子阶段耗时（ms），对数刻度示意</text>

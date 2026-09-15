@@ -110,14 +110,14 @@ flowchart LR
 本项目最核心的算法（KL Observer）正是**信息论量的直接使用**。回顾 KL 散度的定义：
 
 $$
-D_{\mathrm{KL}}(P \,\|\, Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)} = \underbrace{H(P,Q)}_{\text{交叉熵}} - \underbrace{H(P)}_{\text{信源熵}}
+D_{\text{KL}}(P \,\|\, Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)} = H(P,Q) - H(P)
 $$
 
-**信息论解读**：$D_{KL}(P\|Q)$ 度量"用编码方案 $Q$ 去编码真实信源 $P$ 时，相对最优编码额外付出的比特数"（单位：nat/bit）。
+**信息论解读**：$D_{\text{KL}}(P\|Q)$ 度量"用编码方案 $Q$ 去编码真实信源 $P$ 时，相对最优编码额外付出的比特数"（单位：nat/bit）。
 $H(P)$ 是该信源不可再压缩的**信息熵下界**，$H(P,Q)$ 是实际编码的代价。因此——
 
 $$
-\min_{Q} D_{\mathrm{KL}}(P \,\|\, Q) \iff \min_Q H(P,Q) \iff \text{寻找该信源的最短平均码长}
+\min_{Q} D_{\text{KL}}(P \,\|\, Q) \iff \min_Q H(P,Q) \iff \text{寻找该信源的最短平均码长}
 $$
 
 **这正是"压缩即智能"在量化场景下的数学化身**：我们不是随意截断数值范围，而是**寻找使编码代价最小的量化方案**。
@@ -177,10 +177,10 @@ flowchart TD
 **均匀（线性）量化**将浮点值 $x$ 映射到 $b$ 位有符号整数域 $[-2^{b-1}+1,\ 2^{b-1}-1]$：
 
 $$
-s = \frac{\max(|x|)}{2^{b-1}-1}, \qquad q = \operatorname{clamp}\!\Big(\big\lfloor \tfrac{x}{s} \big\rceil,\ -2^{b-1}+1,\ 2^{b-1}-1\Big), \qquad \hat{x} = q \cdot s
+s = \frac{\max(|x|)}{2^{b-1}-1}, \quad q = \text{clamp}\left(\left\lfloor \frac{x}{s} \right\rceil, \; -2^{b-1}+1, \; 2^{b-1}-1\right), \quad \hat{x} = q \cdot s
 $$
 
-其中 $s$ 为量化步长（scale），$\lfloor\cdot\rceil$ 表示四舍五入。**对称量化的关键是：步长由张量的绝对最大值决定**。这带来一个结构性缺陷——
+其中 $s$ 为量化步长（scale），$\lfloor \cdot \rceil$ 表示四舍五入。**对称量化的关键是：步长由张量的绝对最大值决定**。这带来一个结构性缺陷——
 
 > 若激活中存在极少数离群大值（outlier），$\max(|x|)$ 会被拉大，导致量化步长 $s$ 变大，
 > 主体分布的可用量化级别急剧减少，从而产生巨大的量化误差。
@@ -218,19 +218,20 @@ flowchart TD
 $$
 P_j^{(i)} =
 \begin{cases}
-\text{hist}[j], & 0 \le j < i-1 \\[4pt]
-\displaystyle\sum_{t=i-1}^{N-1} \text{hist}[t], & j = i-1
+\text{hist}[j], & 0 \le j < i-1 \\
+\sum_{t=i-1}^{N-1} \text{hist}[t], & j = i-1
 \end{cases}
-\qquad
-\tilde{Q}_j^{(i)} = \frac{1}{L_k}\sum_{t=\text{start}_k}^{\text{end}_k} P_t^{(i)},\quad k=\big\lfloor \tfrac{jM}{i} \big\rfloor
+$$
+
+$$
+\tilde{Q}_j^{(i)} = \frac{1}{L_k}\sum_{t=\text{start}_k}^{\text{end}_k} P_t^{(i)}, \quad k = \left\lfloor \frac{jM}{i} \right\rfloor
 $$
 
 其中将 $[0,i-1]$ 均匀划分为 $M$ 个粗粒度 bin，$L_k = \text{end}_k - \text{start}_k + 1$。最终选取
 
 $$
-i^\* = \arg\min_{i \in [M,\,N]} D_{\mathrm{KL}}\!\big(P^{(i)} \,\|\, \tilde{Q}^{(i)}\big),
-\qquad
-T = \text{bin\_width} \cdot i^\*
+i^{*} = \arg\min_{i \in [M,\,N]} D_{\text{KL}}\left(P^{(i)} \,\|\, \tilde{Q}^{(i)}\right), \quad
+T = \text{bin\_width} \cdot i^{*}
 $$
 
 **为什么有效**：它直接优化"量化后分布"与"真实分布"的信息损失，而非盲目覆盖极值。
@@ -254,16 +255,19 @@ $$
 **解决思路**：改用**对数域量化**，使相邻量化格点在以 2 为底的指数域上均匀，从而获得近似**恒定的相对误差**：
 
 $$
-q = \operatorname{clamp}\!\Big(\big\lfloor \log_2(|x|) - \beta \big\rceil,\ -127,\ 127\Big),
-\qquad
-\hat{x} = \operatorname{sign}(x) \cdot 2^{\,q + \beta}
+q = \text{clamp}\left(\left\lfloor \log_2(|x|) - \beta \right\rceil, \; -127, \; 127\right), \quad
+\hat{x} = \text{sign}(x) \cdot 2^{\,q + \beta}
 $$
 
 其中 $\beta$ 是对数域基准（base），由校准数据非零激活分布的**低百分位**（默认第 5 百分位）估计，使动态范围对齐 INT8 格点。
 零值通过阈值 $\varepsilon$ 精确还原：
 
 $$
-\hat{x} = \begin{cases} 0, & |x| < \varepsilon \\ \operatorname{sign}(x)\cdot 2^{q+\beta}, & \text{otherwise} \end{cases}
+\hat{x} =
+\begin{cases}
+0, & |x| < \varepsilon \\
+\text{sign}(x) \cdot 2^{q+\beta}, & \text{otherwise}
+\end{cases}
 $$
 
 **相对误差对比**：

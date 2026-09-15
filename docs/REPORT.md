@@ -211,15 +211,15 @@ def forward(self, inputs):
 对称均匀量化将浮点值映射到整数域 $[-2^{b-1}+1,\ 2^{b-1}-1]$：
 
 $$
-s = \frac{\max(|x|)}{2^{b-1}-1}, \qquad
-q = \operatorname{clamp}\!\Big(\big\lfloor \tfrac{x}{s} \big\rceil,\ -2^{b-1}+1,\ 2^{b-1}-1\Big), \qquad
+s = \frac{\max(|x|)}{2^{b-1}-1}, \quad
+q = \text{clamp}\left(\left\lfloor \frac{x}{s} \right\rceil, \; -2^{b-1}+1, \; 2^{b-1}-1\right), \quad
 \hat{x} = q \cdot s
 $$
 
 其**绝对误差有上界** $|\hat{x} - x| \le s/2$，与 $x$ 的取值无关。但**相对误差**为
 
 $$
-\frac{|\hat{x} - x|}{|x|} \le \frac{s/2}{|x|} \xrightarrow[\;|x|\to 0\;]{} \infty
+\frac{|\hat{x} - x|}{|x|} \le \frac{s/2}{|x|} \; \to \infty \quad (|x| \to 0)
 $$
 
 即：均匀量化在零点附近相对误差发散。对于零均值拉普拉斯分布的稀疏激活（大部分值趋近 0），这意味着**大量小值信息的相对损失极大**。此外，$s \propto \max(|x|)$ 表明单个离群值会立刻放大步长、压缩主体的可用级别——这正是 vtransform 出现 98.3% range waste 的数学根因。
@@ -231,8 +231,8 @@ $$
 $$
 P_j^{(i)} =
 \begin{cases}
-\text{hist}[j], & 0 \le j < i-1 \\[4pt]
-\displaystyle\sum_{t=i-1}^{N-1} \text{hist}[t], & j = i-1
+\text{hist}[j], & 0 \le j < i-1 \\
+\sum_{t=i-1}^{N-1} \text{hist}[t], & j = i-1
 \end{cases}
 $$
 
@@ -241,40 +241,37 @@ $[\text{start}_k, \text{end}_k] = [\lfloor k\,i/M \rfloor,\ \lfloor (k+1)i/M \rf
 把每段概率质量**均匀展开**回细粒度 bin，得到重分布：
 
 $$
-\tilde{Q}_j^{(i)} = \frac{1}{L_k}\sum_{t=\text{start}_k}^{\text{end}_k} P_t^{(i)},
-\qquad k = \Big\lfloor \frac{j\,M}{i} \Big\rfloor
+\tilde{Q}_j^{(i)} = \frac{1}{L_k}\sum_{t=\text{start}_k}^{\text{end}_k} P_t^{(i)}, \quad k = \left\lfloor \frac{j\,M}{i} \right\rfloor
 $$
 
 最后在所有候选 $i$ 中选取使 KL 散度最小者：
 
 $$
-i^\* = \arg\min_{i \in [M,\,N]} \sum_{j=0}^{i-1} P_j^{(i)} \log \frac{P_j^{(i)}}{\tilde{Q}_j^{(i)}}
-= \arg\min_{i}\ D_{\mathrm{KL}}\!\big(P^{(i)} \,\|\, \tilde{Q}^{(i)}\big),
-\qquad T = \text{bin\_width} \cdot i^\*
+i^{*} = \arg\min_{i \in [M,\,N]} \sum_{j=0}^{i-1} P_j^{(i)} \log \frac{P_j^{(i)}}{\tilde{Q}_j^{(i)}}
+= \arg\min_{i}\ D_{\text{KL}}\left(P^{(i)} \,\|\, \tilde{Q}^{(i)}\right), \quad T = \text{bin\_width} \cdot i^{*}
 $$
 
-之后以 $T$ 替代 $\max(|x|)$ 计算 $s$。**语义**：$D_{\mathrm{KL}}$ 度量"用量化后分布 $\tilde{Q}$ 近似真实分布 $P$ 所付出的额外信息代价"，最小化它等价于寻找在量化分辨率约束下信息保真度最高的截断点。
+之后以 $T$ 替代 $\max(|x|)$ 计算 $s$。**语义**：$D_{\text{KL}}$ 度量"用量化后分布 $\tilde{Q}$ 近似真实分布 $P$ 所付出的额外信息代价"，最小化它等价于寻找在量化分辨率约束下信息保真度最高的截断点。
 
 #### 3.5.3 Log2 对数域量化的误差结构
 
 将量化在**对数域**进行，令相邻格点在以 2 为底的指数域上等距：
 
 $$
-q = \operatorname{clamp}\!\Big(\big\lfloor \log_2(|x|) - \beta \big\rceil,\ -2^{b-1}+1,\ 2^{b-1}-1\Big),
-\qquad
-\hat{x} = \operatorname{sign}(x)\cdot 2^{\,q + \beta}
+q = \text{clamp}\left(\left\lfloor \log_2(|x|) - \beta \right\rceil, \; -2^{b-1}+1, \; 2^{b-1}-1\right), \quad
+\hat{x} = \text{sign}(x) \cdot 2^{\,q + \beta}
 $$
 
 其中基准 $\beta$ 由非零激活的 $p$-分位数（本工作 $p=0.05$）估计，使有效动态范围对齐整数格点：
 
 $$
-\beta = \operatorname{quantile}_{p}\big(\{\log_2|x_i| : |x_i| > \varepsilon\}\big)
+\beta = \text{quantile}_{p}\left(\{\log_2|x_i| : |x_i| > \varepsilon\}\right)
 $$
 
-**相对误差有界性**：设 $q^\* = \log_2|x| - \beta$ 为未取整的理想值。因 $\lfloor \cdot \rceil$ 的取整误差 $|\Delta| \le 1/2$，反量化后的比值为
+**相对误差有界性**：设 $q^{*} = \log_2|x| - \beta$ 为未取整的理想值。因 $\lfloor \cdot \rceil$ 的取整误差 $|\Delta| \le 1/2$，反量化后的比值为
 
 $$
-\frac{\hat{x}}{x} = 2^{\,q - q^\*} = 2^{\Delta} \in \big[\,2^{-1/2},\ 2^{1/2}\,\big]
+\frac{\hat{x}}{x} = 2^{\,q - q^{*}} = 2^{\Delta} \in \left[\,2^{-1/2},\ 2^{1/2}\,\right]
 \;\Longrightarrow\;
 \left|\frac{\hat{x}}{x} - 1\right| \le 1 - 2^{-1/2} \approx 29.3\%
 $$

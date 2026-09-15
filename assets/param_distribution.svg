@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 400" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 400" font-family="'Segoe UI','Microsoft YaHei','PingFang SC','Noto Sans CJK SC','WenQuanYi Micro Hei',Helvetica,Arial,sans-serif">
   <rect width="880" height="400" fill="#ffffff"/>
   <text x="440" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2937">子模块参数量分布与量化路径（总计 40.84M）</text>
   <text x="440" y="56" text-anchor="middle" font-size="12" fill="#6b7280">横向条形长度 ∝ 参数量占比</text>
