@@ -31,7 +31,7 @@ static const char* BEV_POOL_PLUGIN_VERSION = "1";
 //   out: [B, D, H, W, C] output
 //   stream: CUDA stream
 extern "C" void launch_bev_pool_v2(
-    int b, int d, int h, int w, int n_intervals, int c,
+    int b, int d, int h, int w, int n_points, int n_intervals, int c,
     const float* x,
     const int* geom_feats,
     const int* interval_starts,
@@ -101,6 +101,13 @@ public:
     nvinfer1::IPluginV2DynamicExt* clone() const noexcept override;
 
 private:
+    bool validate_input_contract(const nvinfer1::PluginTensorDesc* const inputDesc,
+                                 int32_t nbInputs,
+                                 const nvinfer1::PluginTensorDesc* const outputDesc,
+                                 int32_t nbOutputs,
+                                 const void* const* const inputs,
+                                 void* const* const outputs) const noexcept;
+
     // Output dimensions: [B, D, H, W, C] where D=Z, H=Y, W=X
     int mB, mD, mH, mW;
     std::string mNamespace;

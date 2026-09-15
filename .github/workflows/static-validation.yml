@@ -1,0 +1,46 @@
+name: static-validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-static:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile setup.py tools/build_cuda_ext.py tools/build_trt_engine.py tools/engine_utils.py tools/quant_ptq_minmax.py tools/trt_infer_standalone.py tools/trt_infer_standalone_opt.py
+      - name: Validate project metadata
+        run: |
+          python - <<'PY'
+          import pathlib
+          try:
+              import tomllib
+          except ImportError:
+              import tomli as tomllib
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+          assert data["project"]["name"] == "mmdet3d"
+          assert "research" in data["project"]["optional-dependencies"]
+          assert "deployment" in data["project"]["optional-dependencies"]
+          PY
+      - name: Check repository paths and hard-coded hosts
+        run: |
+          python - <<'PY'
+          import pathlib
+          import re
+          root = pathlib.Path(".")
+          forbidden = re.compile(r"/media/yellowstone|/usr/local/cuda|databig2/gzj")
+          cmake_files = list(root.glob("tools/trt_plugins/**/CMakeLists.txt"))
+          assert cmake_files
+          for path in cmake_files:
+              text = path.read_text(errors="ignore")
+              assert not forbidden.search(text), path
+          PY

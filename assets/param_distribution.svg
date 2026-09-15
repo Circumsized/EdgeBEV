@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 400" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="880" height="400" fill="#ffffff"/>
+  <text x="440" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2937">子模块参数量分布与量化路径（总计 40.84M）</text>
+  <text x="440" y="56" text-anchor="middle" font-size="12" fill="#6b7280">横向条形长度 ∝ 参数量占比</text>
+
+  <!-- rows: name, params, pct, bar width(0-100% mapped to 480px), path color -->
+  <!-- SwinT 27.55M 67.5% path2 orange ; SECOND 4.29M 10.5% path1 blue ; lidar 2.70M 6.6% path3 green ;
+       vtransform 2.61M 6.4% path2 orange ; neck 1.59M 3.9% path1 blue ; head 1.04M 2.5% path2 orange ;
+       fuser 0.78M 1.9% path1 blue ; dec_neck 0.30M 0.7% path1 blue -->
+  <g font-size="13">
+    <!-- Row template: label x=20, bar start x=230, track to x=710, pct text end -->
+    <!-- SwinT -->
+    <text x="20" y="104" fill="#111827" font-weight="600">camera/backbone</text>
+    <text x="20" y="120" fill="#9ca3af" font-size="11">SwinTransformer</text>
+    <rect x="230" y="92" width="324" height="20" rx="3" fill="#fb923c"/>
+    <text x="562" y="107" fill="#111827" font-weight="700">27.55M · 67.5%</text>
+
+    <!-- SECOND -->
+    <text x="20" y="149" fill="#111827" font-weight="600">decoder/backbone</text>
+    <text x="20" y="165" fill="#9ca3af" font-size="11">SECOND</text>
+    <rect x="230" y="137" width="50.4" height="20" rx="3" fill="#3b82f6"/>
+    <text x="288" y="152" fill="#111827">4.29M · 10.5%</text>
+
+    <!-- lidar -->
+    <text x="20" y="194" fill="#111827" font-weight="600">lidar/backbone</text>
+    <text x="20" y="210" fill="#9ca3af" font-size="11">SparseEncoder</text>
+    <rect x="230" y="182" width="31.7" height="20" rx="3" fill="#22c55e"/>
+    <text x="269" y="197" fill="#111827">2.70M · 6.6%</text>
+
+    <!-- vtransform -->
+    <text x="20" y="239" fill="#111827" font-weight="600">camera/vtransform</text>
+    <text x="20" y="255" fill="#9ca3af" font-size="11">LSSTransform</text>
+    <rect x="230" y="227" width="30.7" height="20" rx="3" fill="#fb923c"/>
+    <text x="268" y="242" fill="#111827">2.61M · 6.4%</text>
+
+    <!-- neck -->
+    <text x="20" y="284" fill="#111827" font-weight="600">camera/neck</text>
+    <text x="20" y="300" fill="#9ca3af" font-size="11">GeneralizedLSSFPN</text>
+    <rect x="230" y="272" width="18.7" height="20" rx="3" fill="#3b82f6"/>
+    <text x="256" y="287" fill="#111827">1.59M · 3.9%</text>
+
+    <!-- head -->
+    <text x="20" y="329" fill="#111827" font-weight="600">heads/object</text>
+    <text x="20" y="345" fill="#9ca3af" font-size="11">TransFusionHead</text>
+    <rect x="230" y="317" width="12.0" height="20" rx="3" fill="#fb923c"/>
+    <text x="250" y="332" fill="#111827">1.04M · 2.5%</text>
+
+    <!-- fuser -->
+    <text x="20" y="374" fill="#111827" font-weight="600">fuser</text>
+    <text x="20" y="390" fill="#9ca3af" font-size="11">ConvFuser</text>
+    <rect x="230" y="362" width="9.1" height="20" rx="3" fill="#3b82f6"/>
+    <text x="247" y="377" fill="#111827">0.78M · 1.9%</text>
+  </g>
+
+  <!-- legend -->
+  <g font-size="12">
+    <rect x="600" y="82" width="14" height="14" rx="3" fill="#3b82f6"/>
+    <text x="620" y="93" fill="#374151">路径一 · fx 自动插桩</text>
+    <rect x="600" y="108" width="14" height="14" rx="3" fill="#fb923c"/>
+    <text x="620" y="119" fill="#374151">路径二 · 手动 FakeQuant</text>
+    <rect x="600" y="134" width="14" height="14" rx="3" fill="#22c55e"/>
+    <text x="620" y="145" fill="#374151">路径三 · 稀疏卷积专用</text>
+  </g>
+  <text x="600" y="178" font-size="11" fill="#9ca3af">decoder/neck 0.30M（0.7%，路径一）</text>
+  <text x="600" y="196" font-size="11" fill="#9ca3af">lidar/voxelize 跳过（非 NN 层）</text>
+</svg>

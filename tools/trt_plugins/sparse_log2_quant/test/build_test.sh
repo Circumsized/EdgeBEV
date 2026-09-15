@@ -8,8 +8,8 @@ BUILD_DIR="${SCRIPT_DIR}/build"
 PLUGIN_BUILD_DIR="${SCRIPT_DIR}/../build"
 
 # TRT and CUDA paths
-TRT_ROOT="/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6"
-CUDA_ROOT="/usr/local/cuda"
+TRT_ROOT="${TRT_ROOT:?Set TRT_ROOT to the TensorRT installation prefix}"
+CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda}"
 
 echo "=== Building Plugin Registration Test ==="
 echo "TRT_ROOT: ${TRT_ROOT}"

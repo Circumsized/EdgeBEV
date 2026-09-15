@@ -1,8 +1,15 @@
-﻿# BEVFusion 全模型 INT8 量化研究报告
+# EdgeBEV 技术报告：BEV 感知模型全模型 INT8 量化与 TensorRT 部署
 
-> **项目**：BEVFusion + MQBench 训练后量化（PTQ）
+> **项目**：EdgeBEV 训练后量化（PTQ）
 > **硬件**：NVIDIA RTX 4060 Laptop GPU（Ada Lovelace，Compute 8.9）
 > **框架**：PyTorch 1.10.2 + CUDA 11.3 + MQBench 0.0.6
+
+| 关键指标 | 结果 |
+|---------|------|
+| 量化覆盖 | 8/8 模块 · 40.84M 参数 |
+| 精度 | NDS 0.6875 / mAP 0.6429（FP32 基线 0.7069 / 0.6728） |
+| 精度损失 | **−2.7%**（MinMax 基线 −35.5%） |
+| 部署体积 | 157 MB → **62.9 MB** |
 
 ---
 
@@ -11,6 +18,9 @@
 1. [概述](#1-概述)
 2. [BEVFusion 模型架构分析](#2-bevfusion-模型架构分析)
 3. [量化策略与实现](#3-量化策略与实现)
+   - [3.5 量化数学推导](#35-量化数学推导)
+   - [3.6 两条针对性算法的实现机制](#36-两条针对性算法的实现机制)
+   - [3.7 设计权衡分析](#37-设计权衡分析)
 4. [量化实验](#4-量化实验)
    - [4.1 瓶颈定位：6/8 消融实验](#41-瓶颈定位68-消融实验)
    - [4.2 KL Observer 解决 vtransform 瓶颈](#42-kl-observer-解决-vtransform-瓶颈)
@@ -34,6 +44,30 @@
 BEVFusion 是一种多模态 3D 目标检测模型，融合摄像头和激光雷达信息生成 BEV（鸟瞰图）表示。本项目基于 [MQBench](https://github.com/ModelTC/MQBench) 量化工具库，对 BEVFusion 实施**训练后量化（PTQ）**，目标后端为 NVIDIA TensorRT INT8。
 
 核心挑战在于：BEVFusion 是一个**异构多模态模型**，包含稀疏卷积、自定义 CUDA 算子、Transformer 等多种子模块，无法对全模型统一量化。我们设计了**三条选择性量化路径**，最终实现了 **8/8 全模块 INT8 量化**，精度损失仅 **−2.7%**。
+
+### 1.1 信息论课程设计背景
+
+本项目为**信息论课程设计**，其理论线索来自 Ilya Sutskever 提出的 **"预测即压缩，压缩即智能"**：
+
+> 当我们谈论"预测下一个 token"时，本质上是在进行**信息压缩**。一个理想的预测模型，应以最短的程序
+> 表示输入数据中的规律——这与 **Kolmogorov 复杂度**（产生某对象的最短程序长度）不谋而合。
+> 虽然 Kolmogorov 最优压缩不可计算，但 **SGD 训练神经网络可视为对其的近似搜索**。
+
+本工作把这一思想具体化为一个可度量的实验命题：**把"模型量化"理解为一轮有损信源编码**，
+并在精度约束下寻找使编码代价（失真）最小的量化方案。我们据此提出两个直接对应信息论量的算法：
+
+| 算法 | 信息论工具 | 对应问题 | 效果 |
+|------|-----------|---------|------|
+| **KL Observer** | 交叉熵 / KL 散度 | 为 vtransform 稀疏分布寻找**最短平均码长**的量化码本 | −12.6% → −0.5% |
+| **Log2 量化** | 率-失真 / 熵匹配 | 为 lidar 拉普拉斯激活设计**相对误差有界**的非均匀码本 | −18.5% → −3.1% |
+
+**核心洞察**：MinMax 与 KL+Log2 的**码率完全相同（均为 8 bit/元素）**，但失真相差 **13 倍**
+（35.5% vs 2.7%）。这印证了信息论的基本观点——**压缩质量取决于编码方案是否匹配信源的统计结构，
+而非压缩率本身**。完整推导见 [§3.5 量化数学推导](#35-量化数学推导)，理论展开见仓库根目录 [README.md 设计理念](../README.md#-设计理念)。
+
+Hinton 亦从另一角度指出：AI 系统的理解、类比与创新，关键在于**发现并利用不同事物之间的共同结构**——
+即从表面差异中提炼最本质的共性。本项目两条量化路径（相机分支的空间稀疏、LiDAR 分支的值域稀疏）
+虽物理特性迥异，却都通过"匹配分布"实现了高效压缩，为这一观点提供了一个具象的工程注脚。
 
 ---
 
@@ -165,6 +199,201 @@ def forward(self, inputs):
 - 最小化改动，不改变运行时行为
 - 仅消除 `torch.fx` 追踪时的动态控制流
 - 用 `__init__` 中的常量替代运行时的 `len()` 调用
+
+---
+
+### 3.5 量化数学推导
+
+本节给出报告中两项核心算法的完整数学形式。符号约定：$x$ 为浮点激活，$\hat{x}$ 为反量化后的近似值，$b$ 为位宽（本工作 $b=8$）。
+
+#### 3.5.1 均匀量化的误差结构
+
+对称均匀量化将浮点值映射到整数域 $[-2^{b-1}+1,\ 2^{b-1}-1]$：
+
+$$
+s = \frac{\max(|x|)}{2^{b-1}-1}, \qquad
+q = \operatorname{clamp}\!\Big(\big\lfloor \tfrac{x}{s} \big\rceil,\ -2^{b-1}+1,\ 2^{b-1}-1\Big), \qquad
+\hat{x} = q \cdot s
+$$
+
+其**绝对误差有上界** $|\hat{x} - x| \le s/2$，与 $x$ 的取值无关。但**相对误差**为
+
+$$
+\frac{|\hat{x} - x|}{|x|} \le \frac{s/2}{|x|} \xrightarrow[\;|x|\to 0\;]{} \infty
+$$
+
+即：均匀量化在零点附近相对误差发散。对于零均值拉普拉斯分布的稀疏激活（大部分值趋近 0），这意味着**大量小值信息的相对损失极大**。此外，$s \propto \max(|x|)$ 表明单个离群值会立刻放大步长、压缩主体的可用级别——这正是 vtransform 出现 98.3% range waste 的数学根因。
+
+#### 3.5.2 KL 散度校准的推导
+
+设校准得到的 $N$-bin 直方图为 $\text{hist}$。对候选截断位置 $i$（保留前 $i$ 个 bin），先构造**截断参考分布** $P^{(i)}$——把超出阈值的概率质量 clip 到边界 bin：
+
+$$
+P_j^{(i)} =
+\begin{cases}
+\text{hist}[j], & 0 \le j < i-1 \\[4pt]
+\displaystyle\sum_{t=i-1}^{N-1} \text{hist}[t], & j = i-1
+\end{cases}
+$$
+
+再模拟量化器的**粗粒度分辨率**：将 $[0, i-1]$ 均匀划分为 $M = 2^{b-1}$ 段，第 $k$ 段覆盖
+$[\text{start}_k, \text{end}_k] = [\lfloor k\,i/M \rfloor,\ \lfloor (k+1)i/M \rfloor - 1]$，段长 $L_k = \text{end}_k - \text{start}_k + 1$。
+把每段概率质量**均匀展开**回细粒度 bin，得到重分布：
+
+$$
+\tilde{Q}_j^{(i)} = \frac{1}{L_k}\sum_{t=\text{start}_k}^{\text{end}_k} P_t^{(i)},
+\qquad k = \Big\lfloor \frac{j\,M}{i} \Big\rfloor
+$$
+
+最后在所有候选 $i$ 中选取使 KL 散度最小者：
+
+$$
+i^\* = \arg\min_{i \in [M,\,N]} \sum_{j=0}^{i-1} P_j^{(i)} \log \frac{P_j^{(i)}}{\tilde{Q}_j^{(i)}}
+= \arg\min_{i}\ D_{\mathrm{KL}}\!\big(P^{(i)} \,\|\, \tilde{Q}^{(i)}\big),
+\qquad T = \text{bin\_width} \cdot i^\*
+$$
+
+之后以 $T$ 替代 $\max(|x|)$ 计算 $s$。**语义**：$D_{\mathrm{KL}}$ 度量"用量化后分布 $\tilde{Q}$ 近似真实分布 $P$ 所付出的额外信息代价"，最小化它等价于寻找在量化分辨率约束下信息保真度最高的截断点。
+
+#### 3.5.3 Log2 对数域量化的误差结构
+
+将量化在**对数域**进行，令相邻格点在以 2 为底的指数域上等距：
+
+$$
+q = \operatorname{clamp}\!\Big(\big\lfloor \log_2(|x|) - \beta \big\rceil,\ -2^{b-1}+1,\ 2^{b-1}-1\Big),
+\qquad
+\hat{x} = \operatorname{sign}(x)\cdot 2^{\,q + \beta}
+$$
+
+其中基准 $\beta$ 由非零激活的 $p$-分位数（本工作 $p=0.05$）估计，使有效动态范围对齐整数格点：
+
+$$
+\beta = \operatorname{quantile}_{p}\big(\{\log_2|x_i| : |x_i| > \varepsilon\}\big)
+$$
+
+**相对误差有界性**：设 $q^\* = \log_2|x| - \beta$ 为未取整的理想值。因 $\lfloor \cdot \rceil$ 的取整误差 $|\Delta| \le 1/2$，反量化后的比值为
+
+$$
+\frac{\hat{x}}{x} = 2^{\,q - q^\*} = 2^{\Delta} \in \big[\,2^{-1/2},\ 2^{1/2}\,\big]
+\;\Longrightarrow\;
+\left|\frac{\hat{x}}{x} - 1\right| \le 1 - 2^{-1/2} \approx 29.3\%
+$$
+
+即 **Log2 量化的相对误差被严格限制在 ≈ ±29%（格点比例恒为 2、最大偏差 ±41% 以格点间距计）**，与 $x$ 的绝对大小无关。这恰好补偿了均匀量化"相对误差在零点发散"的缺陷，与稀疏激活"小值密集"的物理分布匹配。
+
+| 特性 | 均匀 INT8 | Log2 量化 |
+|------|-----------|-----------|
+| 绝对误差 | 有界 $\le s/2$ | 随 $|x|$ 增大而增大 |
+| 相对误差 | 零点附近发散 | **有界 ≈ ±29%** |
+| 动态范围 | 固定 $[-\max,\max]$ | 随位宽指数增长 |
+| 硬件实现 | 乘法 + round | 位运算 / 指数（可免乘法） |
+
+---
+
+### 3.6 两条针对性算法的实现机制
+
+#### 3.6.1 KL 校准的校准-推理生命周期
+
+KL Observer 的状态机严格区分**校准**与**推理**两个阶段（与 MQBench `enable_calibration` / `enable_quantization` 兼容）：
+
+```mermaid
+stateDiagram-v2
+    [*] --> 校准期
+    校准期: observer ON / fake_quant OFF
+    校准期: 累积 2048-bin 直方图
+    校准期 --> 阈值求解: 校准 batch 遍历结束
+    阈值求解: 遍历候选 T，最小化 D_KL
+    阈值求解: 写入 min_val / max_val
+    阈值求解 --> 推理期: calculate_qparams()
+    推理期: observer OFF / fake_quant ON
+    推理期: 按 [-T, T] 量化
+    推理期 --> [*]
+```
+
+**关键实现点**：阈值求解发生在 `calculate_qparams()` 调用时，其结果会**改写** observer 的 `min_val/max_val`。因此校验逻辑必须在 `calculate_qparams()` **之后**再次执行，否则会漏检被改写的非法值（该陷阱已在代码审计中确认）。
+
+#### 3.6.2 SparseLog2FakeQuantize 的前向/反向
+
+`SparseLog2FakeQuantize` 实现为 `nn.Module`，前向分为校准分支与量化分支：
+
+```python
+def forward(self, x):
+    if self._observer_enabled:          # 校准期：更新 log2_base
+        nz = x[x.abs() > eps]
+        if per_channel and x.ndim == 2:
+            update_base_per_channel(x)   # 每通道低百分位
+        else:
+            update_base_per_tensor(nz)   # 退化路径（带一次性告警）
+    if not self._fake_quant_enabled:
+        return x
+    zero_mask = x.abs() < eps
+    sign = x.sign()
+    q = round(log2(x.abs().clamp_min(1e-30)) - base).clamp(qmin, qmax)
+    x_dq = sign * exp2(q + base)
+    return where(zero_mask, 0, x_dq)
+```
+
+**直通估计器（STE）**：反向传播时对 `round`/`clamp` 采用 STE，梯度 $\partial \hat{x}/\partial x = 1$（在非截断区间内），保证量化感知训练/微调时梯度可传。
+
+#### 3.6.3 三步数据流示意
+
+```mermaid
+flowchart LR
+    X["激活 x<br/>(稀疏)"] --> Z{"|x| < ε ?"}
+    Z -- 是 --> ZERO["输出 0"]
+    Z -- 否 --> LOG["log2(|x|) − β"]
+    LOG --> R["round + clamp<br/>[-127, 127]"]
+    R --> DEQ["sign(x)·2^(q+β)"]
+    DEQ --> OUT["反量化输出"]
+    style Z fill:#fef3c7,stroke:#f59e0b
+    style R fill:#dbeafe,stroke:#3b82f6
+```
+
+---
+
+### 3.7 设计权衡分析
+
+> 量化不是"越低比特越好、越细粒度越好"的单目标优化，而是在**精度 / 体积 / 硬件友好度 / 校准成本**之间取舍。
+
+**① 校准算法：KL vs MinMax vs Percentile**
+
+| 方案 | 原理 | 优点 | 缺点 | 本工作选择 |
+|------|------|------|------|-----------|
+| MinMax | 取 $[-\max,\max]$ | 简单、无 clip 误差 | 对离群值极敏感（vtransform −12.6%） | ❌ |
+| Percentile | 取分位数区间 | 抗离群、简单 | 分位数是超参、丢弃尾部信息 | 备选 |
+| **KL / Entropy** | 最小化分布信息损失 | **自适应、理论最优** | 计算量较大 | ✅ vtransform |
+
+**决策依据**：vtransform 的瓶颈是**分布形态不匹配**（稀疏尖峰），KL 直接优化分布层面的信息损失，与目标同构；MinMax 的失败不是"数值不够准"，而是"级别分配错了"。
+
+**② 量化粒度：per-tensor vs per-channel**
+
+| 粒度 | (s, z) 数量 | 表达力 | 存储/计算 | lidar 实测 |
+|------|-----------|--------|----------|-----------|
+| per-tensor | 全局 1 组 | 低 | 最小、硬件最快 | **−3.1% ✅** |
+| per-channel | 每通道 1 组 | 高 | 需额外存储 | −4.9% ❌ |
+
+**反直觉结论**：更细的粒度反而更差。原因是本工作校准集仅 ~128 batch，per-channel 需为每层每通道估计独立的 $\log_2$ 基准（21 层 × C 通道），**参数量远超数据支撑能力，导致过拟合校准分布**，泛化到验证集时反而劣化。这是"模型容量 vs 数据量"权衡在量化中的体现。
+
+**③ 非线性量化器：Log2 vs Tan vs 混合**
+
+| 量化器 | 格点分布 | 相对误差特性 | 硬件成本 | 适配分布 |
+|--------|---------|-------------|---------|---------|
+| 均匀 | 等距 | 零点发散 | 最低 | 均匀/高斯 |
+| **Log2** | 指数等距（比 2） | **有界** | 位运算友好 | **幂律/拉普拉斯** |
+| Tan | 两端密中间疏 | 有界 | 需查表 | Softmax 后分布 |
+
+**决策依据**：lidar 激活为零均值拉普拉斯分布，其非零值密度随幅值指数衰减，与 Log2 的"小值密、大值疏"格点结构天然同构；同时 Log2 可用移位/指数近似实现，契合边缘硬件。
+
+**④ 精度 vs 部署体积**
+
+| 配置 | ΔNDS | 部署体积 | 取舍 |
+|------|------|---------|------|
+| FP32 | 0% | 157 MB | 基线 |
+| FP16 | ≈0% | ~78 MB | 保守方案 |
+| **INT8 (KL+Log2)** | **−2.7%** | **62.9 MB** | **本工作平衡点** |
+| 8/8 MinMax | −35.5% | ~62 MB | 体积相当但精度崩溃 → 不可用 |
+
+**结论**：INT8 相对 FP16 仅以 −2.7% NDS 换取约 20% 额外压缩，是体积-精度帕累托前沿上的合理选择；而朴素 MinMax 表明"更激进量化"若缺乏算法支撑将得不偿失。
 
 ---
 
@@ -340,9 +569,9 @@ $$y = \text{sign}(x) \cdot 2^{\text{round}(\log_2(|x| + 1) / \text{scale}) \cdot
 
 | Pipeline | 入口脚本 | 核心特征 | 运行环境 |
 |----------|----------|----------|----------|
-| **Hybrid** | `tools/trt_infer.py` | PyTorch + TRT 混合；vtransform 走原生 PyTorch GPU | `bevfusion_mqbench` |
+| **Hybrid** | `tools/trt_infer.py` | PyTorch + TRT 混合；vtransform 走原生 PyTorch GPU | `edgebev_research` |
 | **Standalone** | `tools/trt_infer_standalone.py` | 同 Hybrid，但 LiDAR 换为 spconv 2.3 / TV，内联 mmcv/mmdet3d 依赖 | `spconv23_deploy` |
-| **Zero-torch** | `tools/trt_infer_zero_torch.py` | 目标：**完全零 PyTorch**，ctypes + 纯 CUDA/C++ 调用 TRT 引擎 | `bevfusion_mqbench` |
+| **Zero-torch** | `tools/trt_infer_zero_torch.py` | 目标：**完全零 PyTorch**，ctypes + 纯 CUDA/C++ 调用 TRT 引擎 | `edgebev_research` |
 
 **重要区分**：旧文档曾将 Hybrid/Standalone 的 fps（5.6 / 5.2）误作为 zero-torch 的成果，实际 zero-torch 因 serial swin 等问题 fps 远低于此。后续各表已严格标注所属 pipeline。
 
@@ -487,5 +716,19 @@ SwinT、bev_downsample、TRT wrapper 层仍存在 PyTorch 依赖。去 PyTorch �
    - GPU Zero-Copy vtransform 从 4528 ms 降至 **188.8 ms（−96%）**
 
 **项目状态**：✅ 量化算法研究与 TRT 部署验证已完成。
+
+**信息论层面的总结**：
+
+本项目从 Ilya Sutskever "预测即压缩，压缩即智能" 的思想出发，将模型量化建模为一轮**有损信源编码**，
+并用信息论工具指导算法设计。三条最关键的结论是：
+
+1. **压缩质量取决于编码与信源的匹配度，而非压缩率**。MinMax 与 KL+Log2 均为 8-bit 码率，
+   但前者失真 35.5%、后者仅 2.7%（相差 13 倍）——因为后者匹配了激活的统计结构（稀疏尖峰 / 拉普拉斯分布）。
+
+2. **KL 散度是"最短有效描述"的直接度量**。$D_{KL}(P\|Q) = H(P,Q) - H(P)$，
+   最小化它等价于在当前量化分辨率约束下逼近该信源的最短平均码长，是 Kolmogorov 最优压缩在量化场景的可行近似。
+
+3. **匹配分布 = 提炼共性**。相机分支（空间稀疏 → KL 截断）与 LiDAR 分支（值域稀疏 → Log2 对数）物理特性迥异，
+   却都通过"让码本匹配信源熵结构"实现了高效压缩，与 Hinton "从表面差异中提炼本质共性"的观点相互印证。
 
 **遗留项**：Zero-torch 路径的 TV LiDAR 一致性收敛、SwinT batch 引擎数值守卫通过、全量 6019 帧 NDS/mAP 基线产出。Jetson Orin 完全零 PyTorch 部署待硬件到位后推进。

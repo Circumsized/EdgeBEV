@@ -1,8 +1,34 @@
-# BEVFusion 运行命令全集
+# EdgeBEV 运行命令全集
 
 > 本文档汇总了项目全部可运行命令，按场景分类：PTQ 量化、TRT 部署、Zero-Torch 验证、Orin 部署。
 >
-> 工作目录：`cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench`
+> 工作目录：`cd <REMOTE_ROOT>/EdgeBEV`
+
+---
+
+## 命令选择指南
+
+```mermaid
+flowchart TD
+    START(["我要做什么？"]) --> Q1{"目标平台？"}
+    Q1 -- 研究/校准 --> Q2{"是否全量化？"}
+    Q1 -- 边缘部署 --> Q3{"是否可保留 PyTorch？"}
+
+    Q2 -- "是（8/8）" --> PTQ8["§1.2 PTQ 8/8<br/>KL + Log2"]
+    Q2 -- "否（7/8 高精度）" --> PTQ7["§1.3 PTQ 7/8<br/>skip lidar"]
+
+    Q3 -- "可（Hybrid）" --> HYB["§2 Hybrid 推理<br/>trt_infer.py"]
+    Q3 -- "否（完全去 PT）" --> ZT["§4 Zero-Torch<br/>trt_infer_zero_torch.py"]
+
+    PTQ8 --> EVAL["§1.5 评估 NDS/mAP"]
+    PTQ7 --> EVAL
+    HYB --> ORIN["§5 Orin 部署"]
+    ZT --> ORIN
+
+    style START fill:#fef3c7,stroke:#f59e0b
+    style PTQ8 fill:#dcfce7,stroke:#22c55e
+    style ZT fill:#dbeafe,stroke:#3b82f6
+```
 
 ---
 
@@ -16,10 +42,10 @@ mkdir -p logs runs
 
 ---
 
-## 1. PTQ 量化命令（`bevfusion_mqbench` 环境）
+## 1. PTQ 量化命令（`edgebev_research` 环境）
 
 ```bash
-conda activate bevfusion_mqbench
+conda activate edgebev_research
 ```
 
 ### 1.1 FP32 基线评估
@@ -97,12 +123,12 @@ torchrun --nproc_per_node=4 --standalone \
 
 ---
 
-## 2. TRT 部署命令（`bevfusion_mqbench` 环境）
+## 2. TRT 部署命令（`edgebev_research` 环境）
 
 ### 2.1 单样本冒烟测试（Hybrid pipeline）
 
 ```bash
-conda activate bevfusion_mqbench
+conda activate edgebev_research
 
 # Phase 5 混合方案
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 \
@@ -183,7 +209,7 @@ python tools/export_utils/build_engine.py \
 ## 3. Standalone 部署命令（`spconv23_deploy` 环境）
 
 ```bash
-conda activate /media/yellowstone/data2/CYL/spconv23_deploy
+conda activate <REMOTE_ROOT>/envs/spconv23_deploy
 ```
 
 ### 3.1 环境准备（首次）
@@ -243,12 +269,12 @@ python -u tools/trt_infer_standalone.py \
 
 ---
 
-## 4. Zero-Torch 验证命令（`bevfusion_mqbench` 环境）
+## 4. Zero-Torch 验证命令（`edgebev_research` 环境）
 
 ### 4.1 端到端单样本一致性验证
 
 ```bash
-conda activate bevfusion_mqbench
+conda activate edgebev_research
 
 python tools/validate_e2e_zero_torch.py \
   --config $CFG --ckpt $CKPT \

@@ -9,8 +9,8 @@
 $env:PYTHONUTF8="1"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
-conda activate bevfusion
-cd D:\Research\Replication\BEVFusion_with_MQBench
+conda activate edgebev
+cd <LOCAL_ROOT>\EdgeBEV
 
 # 2. 打包 Phase 1 部署工具
 # 创建临时目录结构
@@ -34,7 +34,7 @@ tar -czf phase1_deployment.tar.gz -C temp_upload .
 Remove-Item -Recurse -Force temp_upload
 
 # 3. 上传到服务器
-scp phase1_deployment.tar.gz yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/
+scp phase1_deployment.tar.gz <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/
 ```
 
 ## 🚀 服务器部署 (SSH)
@@ -43,13 +43,13 @@ scp phase1_deployment.tar.gz yellowstone@10.129.51.101:/media/yellowstone/data2/
 # ===== 在服务器上执行 =====
 
 # 1. 连接到服务器
-ssh yellowstone@10.129.51.101
+ssh <USER>@<HOST>
 # 密码: wave12968
 
 # 2. 环境初始化
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-export LD_LIBRARY_PATH=/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/lib:$LD_LIBRARY_PATH
+conda activate edgebev_research
+cd <REMOTE_ROOT>/EdgeBEV
+export LD_LIBRARY_PATH=<TRT_ROOT>/lib:$LD_LIBRARY_PATH
 
 # 3. 解压部署工具
 tar -xzf phase1_deployment.tar.gz
@@ -69,14 +69,14 @@ bash tools/export_utils/setup_phase1.sh
 
 ```bash
 # 在服务器上执行（在 tmux 中）
-tmux new-session -d -s bevfusion_phase1
-tmux send-keys -t bevfusion_phase1 "conda activate bevfusion_mqbench" C-m
-tmux send-keys -t bevfusion_phase1 "cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench" C-m
-tmux send-keys -t bevfusion_phase1 "export LD_LIBRARY_PATH=/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/lib:\$LD_LIBRARY_PATH" C-m
-tmux send-keys -t bevfusion_phase1 "python tools/export_utils/phase1_swin_export.py 2>&1 | tee logs/phase1_swin_export.log" C-m
+tmux new-session -d -s edgebev_deploy
+tmux send-keys -t edgebev_deploy "conda activate edgebev_research" C-m
+tmux send-keys -t edgebev_deploy "cd <REMOTE_ROOT>/EdgeBEV" C-m
+tmux send-keys -t edgebev_deploy "export LD_LIBRARY_PATH=<TRT_ROOT>/lib:\$LD_LIBRARY_PATH" C-m
+tmux send-keys -t edgebev_deploy "python tools/export_utils/phase1_swin_export.py 2>&1 | tee logs/phase1_swin_export.log" C-m
 
 # 查看进度
-tmux attach -t bevfusion_phase1
+tmux attach -t edgebev_deploy
 
 # 分离会话（保持后台运行）
 # 按 Ctrl+B 然后按 D
@@ -156,13 +156,13 @@ python -c "import tensorrt as trt; print(trt.__version__)"
 # ===== 在本地 PowerShell 执行 =====
 
 # 下载 ONNX 模型
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/swin_int8.onnx D:\Research\Replication\BEVFusion_with_MQBench\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/swin_int8.onnx <LOCAL_ROOT>\EdgeBEV\
 
 # 下载 TensorRT 引擎
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/swin_int8.engine D:\Research\Replication\BEVFusion_with_MQBench\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/swin_int8.engine <LOCAL_ROOT>\EdgeBEV\
 
 # 下载日志
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/logs/phase1_*.log D:\Research\Replication\BEVFusion_with_MQBench\logs\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/logs/phase1_*.log <LOCAL_ROOT>\EdgeBEV\logs\
 ```
 
 ## 🎯 预期执行时间

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="880" height="420" fill="#ffffff"/>
+  <text x="440" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2937">GPU Zero-Copy VTransform 优化（4528 ms → 188.8 ms，−96%）</text>
+  <text x="440" y="56" text-anchor="middle" font-size="12" fill="#6b7280">各子阶段耗时（ms），对数刻度示意</text>
+
+  <!-- axis -->
+  <line x1="70" y1="360" x2="850" y2="360" stroke="#d1d5db" stroke-width="1.5"/>
+  <g font-size="11" fill="#9ca3af" text-anchor="middle">
+    <text x="150" y="380">compute_</text><text x="150" y="394">depth_map</text>
+    <text x="290" y="380">depthnet_trt</text><text x="290" y="394">(memcpy)</text>
+    <text x="430" y="380">get_geometry</text><text x="430" y="394">+ precompute</text>
+    <text x="590" y="380">bev_pool</text><text x="590" y="394">(H2D/D2H)</text>
+    <text x="740" y="380">总计</text>
+  </g>
+
+  <!-- For each: before bar (light) and after bar (solid). Heights scaled: before/ after -->
+  <!-- depthmap: 470 / 60.6 -->
+  <rect x="110" y="150" width="34" height="210" rx="3" fill="#fca5a5"/>
+  <rect x="148" y="333" width="34" height="27"  rx="3" fill="#16a34a"/>
+  <text x="127" y="144" font-size="11" fill="#dc2626" text-anchor="middle">470</text>
+  <text x="165" y="328" font-size="11" fill="#16a34a" text-anchor="middle">60.6</text>
+  <text x="146" y="410" font-size="10" fill="#6b7280" text-anchor="middle">−87%</text>
+
+  <!-- depthnet: 1072 / 46.8 -->
+  <rect x="250" y="80" width="34" height="280" rx="3" fill="#fca5a5"/>
+  <rect x="288" y="339" width="34" height="21"  rx="3" fill="#16a34a"/>
+  <text x="267" y="74" font-size="11" fill="#dc2626" text-anchor="middle">1072</text>
+  <text x="305" y="334" font-size="11" fill="#16a34a" text-anchor="middle">46.8</text>
+  <text x="286" y="410" font-size="10" fill="#6b7280" text-anchor="middle">−96%</text>
+
+  <!-- geometry+precompute: 559+929=1488 / ~0 -->
+  <rect x="390" y="60" width="34" height="300" rx="3" fill="#fca5a5"/>
+  <rect x="428" y="358" width="34" height="2"   rx="1" fill="#16a34a"/>
+  <text x="407" y="54" font-size="11" fill="#dc2626" text-anchor="middle">1488</text>
+  <text x="445" y="353" font-size="11" fill="#16a34a" text-anchor="middle">≈0</text>
+  <text x="426" y="410" font-size="10" fill="#6b7280" text-anchor="middle">−100%</text>
+
+  <!-- bev_pool: 1416 / 19.7 -->
+  <rect x="550" y="66" width="34" height="294" rx="3" fill="#fca5a5"/>
+  <rect x="588" y="352" width="34" height="8"   rx="3" fill="#16a34a"/>
+  <text x="567" y="60" font-size="11" fill="#dc2626" text-anchor="middle">1416</text>
+  <text x="605" y="347" font-size="11" fill="#16a34a" text-anchor="middle">19.7</text>
+  <text x="586" y="410" font-size="10" fill="#6b7280" text-anchor="middle">−99%</text>
+
+  <!-- total: 4528 / 188.8 -->
+  <rect x="710" y="40" width="34" height="320" rx="3" fill="#fca5a5"/>
+  <rect x="748" y="347" width="34" height="13"  rx="3" fill="#16a34a"/>
+  <text x="727" y="34" font-size="11" fill="#dc2626" text-anchor="middle">4528</text>
+  <text x="765" y="342" font-size="11" fill="#16a34a" text-anchor="middle">188.8</text>
+  <text x="746" y="410" font-size="11" fill="#16a34a" font-weight="700" text-anchor="middle">−96%</text>
+
+  <!-- legend -->
+  <g font-size="12">
+    <rect x="70" y="22" width="14" height="12" rx="3" fill="#fca5a5"/>
+    <text x="90" y="32" fill="#374151">优化前</text>
+    <rect x="150" y="22" width="14" height="12" rx="3" fill="#16a34a"/>
+    <text x="170" y="32" fill="#374151">优化后</text>
+  </g>
+</svg>

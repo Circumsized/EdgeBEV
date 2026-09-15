@@ -1,4 +1,4 @@
-## BEVFusion 全模块 TRT 部署 — Phase 5 交接（2026-03-29）
+## EdgeBEV 全模块 TRT 部署 — Phase 5 交接（2026-03-29）
 
 ### 总体进度
 
@@ -30,7 +30,7 @@
 
 #### 2. 端到端推理 Pipeline (trt_infer.py)
 
-混合 TRT+PyTorch 方案，在 bevfusion_mqbench 环境中运行：
+混合 TRT+PyTorch 方案，在 edgebev_research 环境中运行：
 - TRT 引擎：SwinT, depthnet, fuser+decoder
 - PyTorch：camera neck, bev_pool, LiDAR backbone (spconv 2.1), TransFusionHead
 
@@ -123,12 +123,12 @@ logs/trt_eval_version_B.log              — Version B 评估日志
 ### 环境信息
 
 ```
-bevfusion_mqbench（NDS 评估 + TRT 推理）:
+edgebev_research（NDS 评估 + TRT 推理）:
   Python 3.8 + PyTorch 1.10.2 + spconv 2.1.25 + TRT Python 10.15
   完整 mmdet3d，可跑 tools/test.py 和 tools/trt_infer.py
 
 spconv23_deploy（spconv 2.3 C++ 部署用）:
-  Conda prefix: /media/yellowstone/data2/CYL/spconv23_deploy
+  Conda prefix: <REMOTE_ROOT>/envs/spconv23_deploy
   Python 3.9 + PyTorch 2.0.1+cu118 + spconv 2.3.8 + TRT 8.6.1
 
 硬件: 5 GPU (GPU 0,1,3,4 = RTX 3090 SM8.6; GPU 2 = A100 SM8.0)

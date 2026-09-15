@@ -31,70 +31,69 @@
     interval_lengths : how many points in each pooled point, IntTensor[M]
     out              : output features, FloatTensor[B, D, H, W, C]
 */
-__global__ void bev_pool_v2_kernel(
-    int b, int d, int h, int w, int n_intervals, int c,
+__global__ void __launch_bounds__(256) bev_pool_v2_kernel(
+    int b, int d, int h, int w, int n_points, int n_intervals, int c,
     const float* __restrict__ x,
     const int* __restrict__ geom_feats,
     const int* __restrict__ interval_starts,
     const int* __restrict__ interval_lengths,
     float* __restrict__ out)
 {
-    // Each thread handles one interval (one BEV grid cell) for one channel
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int index = idx / c;
-    int cur_c = idx % c;
-    
-    if (index >= n_intervals) return;
-    
-    int interval_start = interval_starts[index];
-    int interval_length = interval_lengths[index];
-    
-    // Get geom feats for first point in this interval
-    const int* cur_geom_feats = geom_feats + interval_start * 4;
-    int bev_x = cur_geom_feats[0];  // X coordinate
-    int bev_y = cur_geom_feats[1];  // Y coordinate
-    int bev_z = cur_geom_feats[2];  // Z coordinate
-    int batch_idx = cur_geom_feats[3];  // Batch index
-    
-    // Compute output pointer
-    // Output layout: [B, D, H, W, C]
-    // Must match original bev_pool_cuda.cu: out[batch][geom[2]][geom[0]][geom[1]][c]
-    // geom_feats columns: [x, y, z, batch], so: out[batch][z][x][y][c]
-    // With D=Z, H=X, W=Y (matching Python call: bev_pool(x, geom, B, nx[2], nx[0], nx[1]))
-    float* cur_out = out +
-        batch_idx * d * h * w * c +
-        bev_z * h * w * c +
-        bev_x * w * c +
-        bev_y * c +
-        cur_c;
-    
-    // Sum all points in this interval
-    const float* cur_x = x + interval_start * c + cur_c;
-    float psum = 0.0f;
-    for (int i = 0; i < interval_length; i++) {
-        psum += cur_x[i * c];
+    long long total_threads = static_cast<long long>(n_intervals) * c;
+    for (long long idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+         idx < total_threads;
+         idx += static_cast<long long>(blockDim.x) * gridDim.x) {
+        int index = static_cast<int>(idx / c);
+        int cur_c = static_cast<int>(idx % c);
+
+        int interval_start = interval_starts[index];
+        int interval_length = interval_lengths[index];
+        long long interval_end = static_cast<long long>(interval_start) + interval_length;
+        if (interval_start < 0 || interval_length < 0 || interval_end > n_points) continue;
+        if (interval_length == 0) continue;
+
+        const int* cur_geom_feats = geom_feats + static_cast<long long>(interval_start) * 4;
+        int bev_x = cur_geom_feats[0];
+        int bev_y = cur_geom_feats[1];
+        int bev_z = cur_geom_feats[2];
+        int batch_idx = cur_geom_feats[3];
+        if (bev_x < 0 || bev_x >= h || bev_y < 0 || bev_y >= w ||
+            bev_z < 0 || bev_z >= d || batch_idx < 0 || batch_idx >= b) continue;
+
+        long long output_offset = static_cast<long long>(batch_idx) * d * h * w * c +
+            static_cast<long long>(bev_z) * h * w * c +
+            static_cast<long long>(bev_x) * w * c +
+            static_cast<long long>(bev_y) * c + cur_c;
+        float* cur_out = out + output_offset;
+
+        const float* cur_x = x + static_cast<long long>(interval_start) * c + cur_c;
+        float psum = 0.0f;
+        for (int i = 0; i < interval_length; i++) {
+            psum += cur_x[static_cast<long long>(i) * c];
+        }
+
+        *cur_out = psum;
     }
-    
-    *cur_out = psum;
 }
 
 // C interface for Plugin to call
 extern "C" void launch_bev_pool_v2(
-    int b, int d, int h, int w, int n_intervals, int c,
+    int b, int d, int h, int w, int n_points, int n_intervals, int c,
     const float* x,
     const int* geom_feats,
     const int* interval_starts,
     const int* interval_lengths,
     float* out, cudaStream_t stream)
 {
-    int total_threads = n_intervals * c;
-    int block_size = 256;
-    int grid_size = (total_threads + block_size - 1) / block_size;
-    
-    // Limit grid size to avoid overflow
-    if (grid_size > 65535) grid_size = 65535;
-    
+    long long total_threads = static_cast<long long>(n_intervals) * c;
+    if (total_threads <= 0 || n_points < 0 || b <= 0 || d <= 0 || h <= 0 || w <= 0 || c <= 0) {
+        return;
+    }
+    const int block_size = 256;
+    long long grid_size_64 = (total_threads + block_size - 1) / block_size;
+    int grid_size = static_cast<int>(grid_size_64 > 65535LL ? 65535LL : grid_size_64);
+
     bev_pool_v2_kernel<<<grid_size, block_size, 0, stream>>>(
-        b, d, h, w, n_intervals, c,
+        b, d, h, w, n_points, n_intervals, c,
         x, geom_feats, interval_starts, interval_lengths, out);
 }

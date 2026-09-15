@@ -152,13 +152,10 @@ logs/
 *.log
 
 # Build artifacts (Python 3.9 deploy extensions)
-build_sp39/
+build_deploy/
 
 # Third-party source / reference implementations
 temp/
-
-# Claude Code local metadata
-.claude/
 
 # IDE / system
 .idea/

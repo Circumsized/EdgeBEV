@@ -8,9 +8,9 @@ Phase 1 部署脚本 - 在服务器上运行
 4. 运行 export_swin.py
 
 使用方法：
-    conda activate bevfusion_mqbench
-    export LD_LIBRARY_PATH=/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/lib:$LD_LIBRARY_PATH
-    cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+    conda activate edgebev_research
+    export LD_LIBRARY_PATH=<TRT_ROOT>/lib:$LD_LIBRARY_PATH
+    cd <REMOTE_ROOT>/EdgeBEV
     python tools/export_utils/deploy_phase1.py
 """
 

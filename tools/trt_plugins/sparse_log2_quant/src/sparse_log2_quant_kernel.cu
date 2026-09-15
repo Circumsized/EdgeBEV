@@ -34,8 +34,8 @@ static inline __device__ int32_t get_channel_idx(
         return idx % C;
     } else if (nb_dims == 4) {
         // [N, C, H, W] 格式
-        int32_t HW = dim2 * dim3;
-        return (idx / HW) % C;
+        int64_t HW = static_cast<int64_t>(dim2) * static_cast<int64_t>(dim3);
+        return static_cast<int32_t>((idx / HW) % C);
     } else if (nb_dims == 3) {
         // [N, C, D] 格式（较少见）
         return (idx / dim2) % C;
@@ -61,34 +61,37 @@ __global__ void sparse_log2_quant_kernel(
 ) {
     // 计算总元素数
     int64_t total_elements = static_cast<int64_t>(dim0) * dim1 * dim2 * dim3;
-    
-    const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (idx >= total_elements) return;
 
     const int32_t C = dim1;  // 通道数
+    const int64_t stride = static_cast<int64_t>(blockDim.x) * gridDim.x;
 
-    // 获取通道索引
-    const int32_t c = per_channel ? get_channel_idx(idx, C, nb_dims, dim2, dim3) : 0;
-    const float base = log2_base[c];
+    // grid-stride loop：grid 可能因 gridDim.x 上限被截断，必须循环覆盖全部元素
+    for (int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+         idx < total_elements;
+         idx += stride) {
+        // 获取通道索引
+        const int32_t c = per_channel ? get_channel_idx(idx, C, nb_dims, dim2, dim3) : 0;
+        const float base = log2_base[c];
 
-    // 读取输入（half -> float）
-    const float x = __half2float(input[idx]);
+        // 读取输入（half -> float）
+        const float x = __half2float(input[idx]);
 
-    // 零值判断
-    if (fabsf(x) < eps) {
-        output[idx] = __float2half(0.0f);
-        return;
+        // 零值判断
+        if (fabsf(x) < eps) {
+            output[idx] = __float2half(0.0f);
+            continue;
+        }
+
+        // 对数域量化
+        const float sign_x = (x > 0.0f) ? 1.0f : -1.0f;
+        const float log2_x = log2f(fmaxf(fabsf(x), 1e-30f)) - base;
+        float q = roundf(log2_x);
+        q = fmaxf(static_cast<float>(qmin), fminf(static_cast<float>(qmax), q));
+
+        // 反量化
+        const float x_dq = sign_x * exp2f(q + base);
+        output[idx] = __float2half(x_dq);
     }
-
-    // 对数域量化
-    const float sign_x = (x > 0.0f) ? 1.0f : -1.0f;
-    const float log2_x = log2f(fmaxf(fabsf(x), 1e-30f)) - base;
-    float q = roundf(log2_x);
-    q = fmaxf(static_cast<float>(qmin), fminf(static_cast<float>(qmax), q));
-
-    // 反量化
-    const float x_dq = sign_x * exp2f(q + base);
-    output[idx] = __float2half(x_dq);
 }
 
 // C 接口供 Plugin 调用
@@ -114,6 +117,7 @@ void launch_sparse_log2_quant(
     const int64_t grid_size = (total_elements + block_size - 1) / block_size;
 
     // 限制 grid size（CUDA 最大 gridDim.x 是 INT32_MAX）
+    // 注意：kernel 已使用 grid-stride loop 覆盖全部元素，此处截断不会漏算
     uint32_t grid_dim_x = (grid_size > INT32_MAX) ? INT32_MAX : static_cast<uint32_t>(grid_size);
 
     sparse_log2_quant_kernel<<<grid_dim_x, block_size, 0, stream>>>(
@@ -130,4 +134,6 @@ void launch_sparse_log2_quant(
         127,   // qmax
         1e-6f  // eps
     );
+
+    // launch 错误由 plugin 的 enqueue 通过 cudaGetLastError() 统一检查，此处不清空错误状态
 }

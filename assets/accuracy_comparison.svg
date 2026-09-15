@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="gBase" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8e9aaf"/><stop offset="100%" stop-color="#5c6b7f"/>
+    </linearGradient>
+    <linearGradient id="gBest" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4ade80"/><stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+    <linearGradient id="gGood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="gBad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f87171"/><stop offset="100%" stop-color="#dc2626"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="880" height="460" fill="#ffffff"/>
+  <text x="440" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2937">EdgeBEV 量化配置精度对比（nuScenes val，6019 帧）</text>
+  <text x="440" y="56" text-anchor="middle" font-size="12" fill="#6b7280">NDS ↑ 越高越好 ｜ FP32 基线 = 0.7069</text>
+
+  <!-- Y axis grid -->
+  <g stroke="#e5e7eb" stroke-width="1">
+    <line x1="80" y1="380" x2="840" y2="380"/>
+    <line x1="80" y1="317" x2="840" y2="317"/>
+    <line x1="80" y1="254" x2="840" y2="254"/>
+    <line x1="80" y1="191" x2="840" y2="191"/>
+    <line x1="80" y1="128" x2="840" y2="128"/>
+  </g>
+  <g fill="#9ca3af" font-size="11" text-anchor="end">
+    <text x="72" y="384">0.40</text>
+    <text x="72" y="321">0.48</text>
+    <text x="72" y="258">0.56</text>
+    <text x="72" y="195">0.64</text>
+    <text x="72" y="132">0.72</text>
+  </g>
+
+  <!-- baseline dashed line at 0.7069 -->
+  <line x1="80" y1="113" x2="840" y2="113" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="845" y="110" font-size="11" fill="#ef4444" text-anchor="end">基线 0.7069</text>
+
+  <!-- Bars: baseline 0.7069(gray), 8/8 best 0.6875(green), 7/8 0.7033(blue), 6/8 0.7010(blue), minmax 0.4562(red) -->
+  <!-- scale: y = 380 - (v-0.40)/0.32*252 ; step per 0.08 = 63px -->
+  <!-- 0.7069 -> 113 ; 0.6875 -> 129 ; 0.7033 -> 116 ; 0.7010 -> 118 ; 0.4562 -> 313 -->
+  <g>
+    <rect x="110"  y="113" width="104" height="267" rx="4" fill="url(#gBase)"/>
+    <rect x="250" y="129" width="104" height="251" rx="4" fill="url(#gBest)"/>
+    <rect x="390" y="116" width="104" height="264" rx="4" fill="url(#gGood)"/>
+    <rect x="530" y="118" width="104" height="262" rx="4" fill="url(#gGood)"/>
+    <rect x="670" y="313" width="104" height="67"  rx="4" fill="url(#gBad)"/>
+  </g>
+
+  <!-- values -->
+  <g font-size="14" font-weight="700" text-anchor="middle" fill="#111827">
+    <text x="162" y="105">0.7069</text>
+    <text x="302" y="121">0.6875</text>
+    <text x="442" y="108">0.7033</text>
+    <text x="582" y="110">0.7010</text>
+    <text x="722" y="305">0.4562</text>
+  </g>
+  <!-- delta labels -->
+  <g font-size="11" text-anchor="middle">
+    <text x="162" y="405" fill="#6b7280">FP32 基线</text>
+    <text x="302" y="405" fill="#16a34a" font-weight="700">8/8 全量 −2.7%</text>
+    <text x="442" y="405" fill="#2563eb">7/8 −0.5%</text>
+    <text x="582" y="405" fill="#2563eb">6/8 −0.83%</text>
+    <text x="722" y="405" fill="#dc2626">8/8 MinMax −35.5%</text>
+  </g>
+  <g font-size="11" text-anchor="middle" fill="#374151">
+    <text x="162" y="423">原始模型</text>
+    <text x="302" y="423">KL + Log2</text>
+    <text x="442" y="423">skip lidar</text>
+    <text x="582" y="423">skip vt+lidar</text>
+    <text x="722" y="423">传统 MinMax</text>
+  </g>
+</svg>

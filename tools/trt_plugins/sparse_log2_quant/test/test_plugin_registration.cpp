@@ -4,8 +4,8 @@
  *
  * 编译命令：
  *   g++ -o test_plugin_registration test_plugin_registration.cpp \
- *       -I/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/include \
- *       -L/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/lib \
+ *       -I<TRT_ROOT>/include \
+ *       -L<TRT_ROOT>/lib \
  *       -lnvinfer -lcudart \
  *       -L../build -lsparse_log2_quant_plugin \
  *       -Wl,-rpath,../build

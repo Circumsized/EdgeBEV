@@ -8,9 +8,9 @@ Phase 1: SwinTransformer 静态化与 Q/DQ ONNX 导出完整流程
 3. 验证 ONNX 模型结构
 
 【使用方法】
-conda activate bevfusion_mqbench
-export LD_LIBRARY_PATH=/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/lib:$LD_LIBRARY_PATH
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev_research
+export LD_LIBRARY_PATH=<TRT_ROOT>/lib:$LD_LIBRARY_PATH
+cd <REMOTE_ROOT>/EdgeBEV
 
 # 完整流程：
 python tools/export_utils/phase1_swin_export.py

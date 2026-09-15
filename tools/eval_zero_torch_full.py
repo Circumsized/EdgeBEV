@@ -14,14 +14,14 @@ import torch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.getcwd())
-_BUILD_SP39 = os.path.join(ROOT, "build_sp39")
+_BUILD_DEPLOY = os.path.join(ROOT, "build_deploy")
 if (
     os.environ.get("BEVFUSION_STANDALONE") == "1"
     and sys.version_info >= (3, 9)
-    and os.path.isdir(_BUILD_SP39)
+    and os.path.isdir(_BUILD_DEPLOY)
 ):
     # Optional standalone mode for py39; full-ops mode remains default.
-    sys.path.insert(0, _BUILD_SP39)
+    sys.path.insert(0, _BUILD_DEPLOY)
     try:
         import bev_pool_ext as _bev_pool_ext
         import voxel_layer as _voxel_layer

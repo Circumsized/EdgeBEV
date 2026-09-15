@@ -1,3 +1,22 @@
+# EdgeBEV 实验结果日志
+
+> 本文档按时间记录各轮量化与部署实验的原始结果，是技术报告 [REPORT.md](REPORT.md) 的数据来源。
+> 结论以最新、完整验证集（6019 帧）的结果为准，早期 mini 数据集（81 帧）结果仅作开发期快速验证参考。
+
+```mermaid
+timeline
+    title EdgeBEV 研究时间线
+    Round 1-3 : 早期 PTQ 基础实验
+    Round 4 : 引入 KL Observer（vtransform −12.6% → −0.5%）
+    Round 5 : 校准集修正（Val → Train）
+    Round 6-7 : Per-channel 量化探索
+    Round 8 : W8A16 控制实验（确认激活瓶颈）
+    Round 9 : Log2 对数域量化突破（lidar −18.5% → −3.1%）
+    Phase 5-9 : TensorRT 部署与去 PyTorch 化
+```
+
+---
+
 ## 2026-03-03 · 服务器完整验证集评估（nuScenes v1.0-trainval val，6019 帧）
 
 **环境**：服务器 4×RTX 3090 + 1×A100-SXM4-80GB，CUDA 12.2，PyTorch 1.10.2+cu113，TensorRT 10.15.1.29（tensorrt-cu12），mmcv-full 1.4.0
@@ -500,7 +519,7 @@ lidar 量化的 −18.6% 精度损失是 per-tensor INT8 对稀疏特征的固�
 
 ## 2026-04-05 · Phase 7/8/9：spconv 2.3 迁移 + TV 去 PyTorch LiDAR + TV INT8 Log2 部署验证
 
-**背景**：核心量化算法（Round 9）已完成，但原推理脚本依赖 `bevfusion_mqbench` 环境（Python 3.8 + PyTorch 1.10 + spconv 2.1）。为在服务器/边缘设备上独立部署，迁移至 `spconv23_deploy` 环境（Python 3.9 + PyTorch 2.0 + spconv 2.3），并逐步实现零 PyTorch LiDAR backbone。
+**背景**：核心量化算法（Round 9）已完成，但原推理脚本依赖 `edgebev_research` 环境（Python 3.8 + PyTorch 1.10 + spconv 2.1）。为在服务器/边缘设备上独立部署，迁移至 `spconv23_deploy` 环境（Python 3.9 + PyTorch 2.0 + spconv 2.3），并逐步实现零 PyTorch LiDAR backbone。
 
 **关键工作**：
 1. **Phase 7**：Standalone 推理脚本迁移（`trt_infer_standalone.py`），解决 `WeightFakeQuantize` scale shape [1] → [out_channels] 的 bug

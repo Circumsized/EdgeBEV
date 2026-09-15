@@ -17,7 +17,7 @@ import torch
 
 # Pre-load the original extension (same as trt_infer_standalone.py does)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.join(ROOT, "build_sp39"))
+sys.path.insert(0, os.path.join(ROOT, "build_deploy"))
 import bev_pool_ext as _bev_pool_ext
 
 from bev_pool_wrapper import bev_pool_forward

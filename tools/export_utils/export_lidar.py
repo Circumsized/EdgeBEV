@@ -613,7 +613,7 @@ def export_onnx(model, voxels, coors, batch_size, save_path):
     opset = [helper.make_operatorsetid("ai.onnx", 11)]
     onnx_model = helper.make_model(
         graph, opset_imports=opset,
-        producer_name="bevfusion_mqbench",
+        producer_name="edgebev_research",
         producer_version="1.0",
     )
     onnx.save_model(onnx_model, save_path)

@@ -7,7 +7,7 @@ Phase 5 (hybrid): TRT engines for SwinT, depthnet, fuser+decoder;
 Phase 6 (full TRT): additionally replaces camera neck and TransFusionHead with TRT engines,
     and uses bev_pool_v2 CUDA kernel directly (no vtransform module dependency).
 
-Runs in bevfusion_mqbench environment (Python 3.8, PyTorch 1.10.2, TRT 10.15, mmdet3d).
+Runs in edgebev_research environment (Python 3.8, PyTorch 1.10.2, TRT 10.15, mmdet3d).
 
 Usage:
     # Phase 6 — full TRT (neck + head engines)

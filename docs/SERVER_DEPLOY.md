@@ -1,18 +1,22 @@
-# 服务器部署与运行手册
+# 远程服务器部署参考示例
+
+> 本文档给出在远程 GPU 服务器上部署与运行 EdgeBEV 的**参考流程**。
+> 文中以 `<LOCAL_ROOT>`、`<REMOTE_ROOT>`、`<USER>`、`<HOST>` 等占位符代表本地工作目录、
+> 远程根目录、登录用户名与主机地址，请按实际环境替换。
 
 ### 本地 PowerShell 环境初始化
 ```powershell
 $env:PYTHONUTF8="1"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
-conda activate bevfusion
-cd D:\Research\Replication\BEVFusion_with_MQBench
+conda activate edgebev
+cd <LOCAL_ROOT>\EdgeBEV
 ```
 
 ### 服务器 Bash 环境初始化
 ```bash
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 export LD_LIBRARY_PATH=$(python -c "import torch,os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))"):$LD_LIBRARY_PATH
 ```
 
@@ -47,7 +51,7 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=X python tools/xxx.py ... 2>&1
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-cd D:\Research\Replication\BEVFusion_with_MQBench
+cd <LOCAL_ROOT>\EdgeBEV
 
 # 打包所有更新的代码和文档（排除数据集/权重/编译产物）
 git archive HEAD --format=tar.gz -o code_update.tar.gz `
@@ -65,11 +69,11 @@ git archive HEAD --format=tar.gz -o code_update.tar.gz `
     README.md
 
 # 一次 SCP 上传（输入一次密码）
-scp code_update.tar.gz yellowstone@10.129.51.101:/tmp/
+scp code_update.tar.gz <USER>@<HOST>:/tmp/
 
 # SSH 解压（再输一次密码）
-ssh yellowstone@10.129.51.101 `
-    "cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench && tar xzf /tmp/code_update.tar.gz && rm /tmp/code_update.tar.gz && echo 'Upload OK'"
+ssh <USER>@<HOST> `
+    "cd <REMOTE_ROOT>/EdgeBEV && tar xzf /tmp/code_update.tar.gz && rm /tmp/code_update.tar.gz && echo 'Upload OK'"
 ```
 
 ---
@@ -77,9 +81,9 @@ ssh yellowstone@10.129.51.101 `
 ## Step 1：SSH 进服务器，确认环境
 
 ```bash
-ssh yellowstone@10.129.51.101
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+ssh <USER>@<HOST>
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 
 # 确认 MQBench 已安装（PTQ 必须）
 python -c "import mqbench; print('MQBench OK:', mqbench.__version__)" \
@@ -138,8 +142,8 @@ tmux new-session -d -s gpu4
 **每个 tmux 窗口的环境初始化（必须每次执行）：**
 
 ```bash
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 export LD_LIBRARY_PATH=$(python -c "import torch,os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))"):$LD_LIBRARY_PATH
 ```
 
@@ -248,11 +252,11 @@ ls -lh server_ptq_results.tar.gz
 **在本地 PowerShell 拉取：**
 
 ```powershell
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/server_ptq_results.tar.gz `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/server_ptq_results.tar.gz `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\
 
 # 解压查看
-cd D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts
+cd <LOCAL_ROOT>\EdgeBEV\server_artifacts
 tar xzf server_ptq_results.tar.gz
 ```
 
@@ -280,13 +284,13 @@ tar xzf server_ptq_results.tar.gz
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-cd D:\Research\Replication\BEVFusion_with_MQBench
+cd <LOCAL_ROOT>\EdgeBEV
 git archive HEAD --format=tar.gz -o code_update.tar.gz -- tools/quant_ptq_minmax.py
 
-scp code_update.tar.gz yellowstone@10.129.51.101:/tmp/
+scp code_update.tar.gz <USER>@<HOST>:/tmp/
 
-ssh yellowstone@10.129.51.101 `
-    "cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench && tar xzf /tmp/code_update.tar.gz && rm /tmp/code_update.tar.gz && echo 'Upload OK'"
+ssh <USER>@<HOST> `
+    "cd <REMOTE_ROOT>/EdgeBEV && tar xzf /tmp/code_update.tar.gz && rm /tmp/code_update.tar.gz && echo 'Upload OK'"
 ```
 
 ### Round 2 Step 1：实验清单（4 个实验并行）
@@ -305,8 +309,8 @@ ssh yellowstone@10.129.51.101 `
 **每个 tmux 窗口先执行：**
 
 ```bash
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 export LD_LIBRARY_PATH=$(python -c "import torch,os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))"):$LD_LIBRARY_PATH
 ```
 
@@ -385,10 +389,10 @@ ls -lh server_lwc_results.tar.gz
 **本地拉取：**
 
 ```powershell
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/server_lwc_results.tar.gz `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/server_lwc_results.tar.gz `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\
 
-cd D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts
+cd <LOCAL_ROOT>\EdgeBEV\server_artifacts
 tar xzf server_lwc_results.tar.gz
 ```
 
@@ -405,13 +409,13 @@ tar xzf server_lwc_results.tar.gz
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-cd D:\Research\Replication\BEVFusion_with_MQBench
+cd <LOCAL_ROOT>\EdgeBEV
 git archive HEAD --format=tar.gz -o code_update.tar.gz -- tools/quant_ptq_minmax.py
 
-scp code_update.tar.gz yellowstone@10.129.51.101:/tmp/
+scp code_update.tar.gz <USER>@<HOST>:/tmp/
 
-ssh yellowstone@10.129.51.101 `
-    "cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench && tar xzf /tmp/code_update.tar.gz && rm /tmp/code_update.tar.gz && echo 'Upload OK'"
+ssh <USER>@<HOST> `
+    "cd <REMOTE_ROOT>/EdgeBEV && tar xzf /tmp/code_update.tar.gz && rm /tmp/code_update.tar.gz && echo 'Upload OK'"
 ```
 
 ### Round 3 Step 1：实验清单（2 张 3090 并行）
@@ -426,8 +430,8 @@ ssh yellowstone@10.129.51.101 `
 ### Round 3 Step 2：环境初始化（每个 tmux 窗口）
 
 ```bash
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 export LD_LIBRARY_PATH=$(python -c "import torch,os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))"):$LD_LIBRARY_PATH
 ```
 
@@ -485,10 +489,10 @@ ls -lh server_calib512_results.tar.gz
 **本地拉取：**
 
 ```powershell
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/server_calib512_results.tar.gz `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/server_calib512_results.tar.gz `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\
 
-cd D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts
+cd <LOCAL_ROOT>\EdgeBEV\server_artifacts
 tar xzf server_calib512_results.tar.gz
 ```
 
@@ -557,10 +561,10 @@ ls -lh server_calib512_results.tar.gz
 **本地拉取：**
 
 ```powershell
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/server_calib512_results.tar.gz `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/server_calib512_results.tar.gz `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\
 
-cd D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts
+cd <LOCAL_ROOT>\EdgeBEV\server_artifacts
 tar xzf server_calib512_results.tar.gz
 ```
 
@@ -587,7 +591,7 @@ Round 3 确认 EMAMinMaxObserver 是 8/8 精度崩溃的主因之一：vtransfor
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-cd D:\Research\Replication\BEVFusion_with_MQBench
+cd <LOCAL_ROOT>\EdgeBEV
 
 # 打包 KL Observer 分支代码
 git archive exp/lss-kl-divergence-calibration --format=tar.gz -o code_update_kl.tar.gz `
@@ -597,12 +601,12 @@ git archive exp/lss-kl-divergence-calibration --format=tar.gz -o code_update_kl.
     docs/SERVER_DEPLOY.md
 
 # 上传到服务器
-scp code_update_kl.tar.gz yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/
+scp code_update_kl.tar.gz <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/
 ```
 
 ```bash
 # ===== 在服务器执行 =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 tar xzf code_update_kl.tar.gz
 ```
 
@@ -610,8 +614,8 @@ tar xzf code_update_kl.tar.gz
 
 ```bash
 # ===== tmux pane for GPU#0: 8/8 KL(both) — 核心实验 =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -623,8 +627,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#1: 7/8 +vtransform KL =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -636,8 +640,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#3: 7/8 +lidar KL =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -649,8 +653,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#4: 8/8 KL(vt only) =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -684,7 +688,7 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 python tools/quant_ptq_minma
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-cd D:\Research\Replication\BEVFusion_with_MQBench
+cd <LOCAL_ROOT>\EdgeBEV
 
 # 打包修正后的代码
 git archive HEAD --format=tar.gz -o code_update_round5.tar.gz `
@@ -693,19 +697,19 @@ git archive HEAD --format=tar.gz -o code_update_round5.tar.gz `
     docs/RESULTS_LOG.md
 
 # 上传
-scp code_update_round5.tar.gz yellowstone@10.129.51.101:/tmp/
+scp code_update_round5.tar.gz <USER>@<HOST>:/tmp/
 
 # 解压
-ssh yellowstone@10.129.51.101 `
-    "cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench && tar xzf /tmp/code_update_round5.tar.gz && rm /tmp/code_update_round5.tar.gz && echo 'Upload OK'"
+ssh <USER>@<HOST> `
+    "cd <REMOTE_ROOT>/EdgeBEV && tar xzf /tmp/code_update_round5.tar.gz && rm /tmp/code_update_round5.tar.gz && echo 'Upload OK'"
 ```
 
 ### Round 5 Step 1：服务器环境确认
 
 ```bash
-ssh yellowstone@10.129.51.101
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+ssh <USER>@<HOST>
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 
 # 确认训练集大小（应该显示 ~27000+ 帧）
 python -c "import pickle; d = pickle.load(open('data/nuscenes/nuscenes_infos_train.pkl', 'rb')); print(f'Train frames: {len(d[\"infos\"])}')"
@@ -729,8 +733,8 @@ tmux new-session -d -s round5_gpu4
 
 ```bash
 tmux attach -t round5_gpu0
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 \
 python tools/quant_ptq_minmax.py \
@@ -749,8 +753,8 @@ python tools/quant_ptq_minmax.py \
 
 ```bash
 tmux attach -t round5_gpu1
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 \
 python tools/quant_ptq_minmax.py \
@@ -768,8 +772,8 @@ python tools/quant_ptq_minmax.py \
 
 ```bash
 tmux attach -t round5_gpu3
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 \
 python tools/quant_ptq_minmax.py \
@@ -789,8 +793,8 @@ python tools/quant_ptq_minmax.py \
 
 ```bash
 tmux attach -t round5_gpu4
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 \
 python tools/quant_ptq_minmax.py \
@@ -835,9 +839,9 @@ ls -lh round5_kl_calib128_results.tar.gz
 #### 本地拉取（PowerShell）
 
 ```powershell
-cd D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts
+cd <LOCAL_ROOT>\EdgeBEV\server_artifacts
 
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/round5_kl_calib128_results.tar.gz .
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/round5_kl_calib128_results.tar.gz .
 
 # 解压并查看 NDS 结果
 tar xzf round5_kl_calib128_results.tar.gz
@@ -869,7 +873,7 @@ grep -h "object/nds" round5_ptq_*.log | head -4
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-cd D:\Research\Replication\BEVFusion_with_MQBench
+cd <LOCAL_ROOT>\EdgeBEV
 
 # 本地直接打包（包含未提交的本地修改，不依赖 git archive）
 Remove-Item code_update_round6.tar.gz -ErrorAction SilentlyContinue
@@ -878,12 +882,12 @@ tar -czf code_update_round6.tar.gz `
     docs/SERVER_DEPLOY.md
 
 # 上传到服务器项目目录
-scp code_update_round6.tar.gz yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/
+scp code_update_round6.tar.gz <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/
 ```
 
 ```bash
 # ===== 在服务器执行 =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 tar xzf code_update_round6.tar.gz
 mkdir -p logs
 ```
@@ -901,8 +905,8 @@ mkdir -p logs
 
 ```bash
 # ===== tmux pane for GPU#0: R6-A (PTQ6 + lidar per-channel, EMA) =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -916,8 +920,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#1: R6-B (PTQ6 + lidar per-channel + vt KL, EMA) =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -931,8 +935,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#3: R6-C (PTQ6 + lidar per-channel, MSE) =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -946,8 +950,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#4: R6-D (PTQ6 + lidar per-channel + vt KL, MSE) =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -963,7 +967,7 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 python tools/quant_ptq_minma
 
 ```bash
 # ===== 在服务器执行 =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 tar czf round6_results.tar.gz \
     logs/round6_ptq6_plus_lidar_pc_ema_calib128s.log \
     logs/round6_ptq6_plus_lidar_pc_vtkl_ema_calib128s.log \
@@ -978,15 +982,15 @@ ls -lh round6_results.tar.gz
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/round6_results.tar.gz `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/round6_results.tar.gz `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\
 
-cd D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts
+cd <LOCAL_ROOT>\EdgeBEV\server_artifacts
 tar xzf round6_results.tar.gz
 
 # 可选：仅拉日志（不拉模型）
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/logs/round6_*.log `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\logs\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/logs/round6_*.log `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\logs\
 ```
 
 ### Round 6 结果解读指引
@@ -1010,7 +1014,7 @@ scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBenc
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-cd D:\Research\Replication\BEVFusion_with_MQBench
+cd <LOCAL_ROOT>\EdgeBEV
 
 # 本地直接打包（包含未提交修改，不依赖 git archive）
 Remove-Item code_update_round7.tar.gz -ErrorAction SilentlyContinue
@@ -1019,12 +1023,12 @@ tar -czf code_update_round7.tar.gz `
     docs/SERVER_DEPLOY.md
 
 # 上传到服务器项目目录
-scp code_update_round7.tar.gz yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/
+scp code_update_round7.tar.gz <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/
 ```
 
 ```bash
 # ===== 在服务器执行 =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 tar xzf code_update_round7.tar.gz
 mkdir -p logs
 ```
@@ -1042,8 +1046,8 @@ mkdir -p logs
 
 ```bash
 # ===== tmux pane for GPU#0: R7-A =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -1057,8 +1061,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#1: R7-B =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -1072,8 +1076,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#3: R7-C =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -1088,8 +1092,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 python tools/quant_ptq_minma
 
 ```bash
 # ===== tmux pane for GPU#4: R7-D =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -1106,7 +1110,7 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 python tools/quant_ptq_minma
 
 ```bash
 # ===== 在服务器执行 =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 tar czf round7_results.tar.gz \
     logs/round7_ptq6_lidar_pc_kl_calib128s.log \
     logs/round7_ptq8_vtkl_lidarpc_kl_calib128s.log \
@@ -1121,15 +1125,15 @@ ls -lh round7_results.tar.gz
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/round7_results.tar.gz `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/round7_results.tar.gz `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\
 
-cd D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts
+cd <LOCAL_ROOT>\EdgeBEV\server_artifacts
 tar xzf round7_results.tar.gz
 
 # 可选：仅拉日志（不拉模型）
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/logs/round7_*.log `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\logs\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/logs/round7_*.log `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\logs\
 ```
 
 ### Round 7 结果解读指引
@@ -1165,19 +1169,19 @@ scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBenc
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-cd D:\Research\Replication\BEVFusion_with_MQBench
+cd <LOCAL_ROOT>\EdgeBEV
 
 Remove-Item code_update_round8.tar.gz -ErrorAction SilentlyContinue
 tar -czf code_update_round8.tar.gz `
     tools/quant_ptq_minmax.py `
     docs/SERVER_DEPLOY.md
 
-scp code_update_round8.tar.gz yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/
+scp code_update_round8.tar.gz <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/
 ```
 
 ```bash
 # ===== 在服务器执行 =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 tar xzf code_update_round8.tar.gz
 mkdir -p logs
 ```
@@ -1204,8 +1208,8 @@ mkdir -p logs
 **每个 tmux 窗口执行前的环境初始化（必须）：**
 
 ```bash
-conda activate bevfusion_mqbench
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev
+cd <REMOTE_ROOT>/EdgeBEV
 export LD_LIBRARY_PATH=$(python -c "import torch,os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))"):$LD_LIBRARY_PATH
 ```
 
@@ -1215,8 +1219,8 @@ export LD_LIBRARY_PATH=$(python -c "import torch,os; print(os.path.join(os.path.
 # ===== tmux pane for GPU#0: R8-A =====
 # 7/8（skip vtransform）+ lidar sparse-aware KL per-tensor
 # 核心验证：sparse_mode 修复是否能让 per-tensor KL 打破 −18% 瓶颈
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -1232,8 +1236,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 python tools/quant_ptq_minma
 # ===== tmux pane for GPU#1: R8-B =====
 # 8/8 + vt(KL) + lidar sparse-aware KL per-tensor
 # 核心验证：8/8 全量化在 sparse_mode 修复后是否能越过 −18% 的上限
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -1250,8 +1254,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 python tools/quant_ptq_minma
 # 7/8（skip vtransform）+ lidar W8A16（仅权重量化，激活保持 FP）
 # 控制实验：如果 NDS 损失接近 0，说明 −18% 100% 来自激活量化；
 #           如果仍有较大损失，说明权重量化也有贡献
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -1266,8 +1270,8 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 python tools/quant_ptq_minma
 # ===== tmux pane for GPU#4: R8-D =====
 # 8/8 + vt(KL) + lidar sparse-aware KL per-channel
 # 在 sparse_mode 修复的基础上，验证 per-channel 是否进一步带来增益
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 python tools/quant_ptq_minmax.py \
     configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
     --load-from pretrained/bevfusion-det.pth \
@@ -1306,7 +1310,7 @@ grep -h "NDS\|nds" logs/round8_*.log | grep -v "^#"
 
 ```bash
 # ===== 在服务器执行 =====
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 tar czf round8_results.tar.gz \
     logs/round8_ptq7_lidar_sparse_kl_pt_calib128s.log \
     logs/round8_ptq8_vtkl_lidar_sparse_kl_pt_calib128s.log \
@@ -1321,15 +1325,15 @@ ls -lh round8_results.tar.gz
 
 ```powershell
 # ===== 在本地 PowerShell 执行 =====
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/round8_results.tar.gz `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/round8_results.tar.gz `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\
 
-cd D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts
+cd <LOCAL_ROOT>\EdgeBEV\server_artifacts
 tar xzf round8_results.tar.gz
 
 # 可选：仅拉日志（不拉模型）
-scp yellowstone@10.129.51.101:/media/yellowstone/data2/CYL/BEVFusion_with_MQBench/logs/round8_*.log `
-    D:\Research\Replication\BEVFusion_with_MQBench\server_artifacts\logs\
+scp <USER>@<HOST>:<REMOTE_ROOT>/EdgeBEV/logs/round8_*.log `
+    <LOCAL_ROOT>\EdgeBEV\server_artifacts\logs\
 ```
 
 ---

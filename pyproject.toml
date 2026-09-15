@@ -1,0 +1,33 @@
+[build-system]
+requires = [
+    "setuptools>=61",
+    "wheel",
+    "torch>=1.10",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mmdet3d"
+version = "0.0.0"
+description = "EdgeBEV: edge-deployable BEV perception with INT8 quantization and TensorRT"
+license = "Apache-2.0"
+requires-python = ">=3.8"
+dynamic = ["classifiers"]
+
+[project.optional-dependencies]
+research = [
+    "numpy<2",
+    "mmcv-full==1.4.0",
+    "mmdet==2.20.0",
+    "mqbench==0.0.6",
+    "torchpack",
+]
+deployment = [
+    "numpy>=1.23",
+    "onnx>=1.14",
+    "onnxruntime>=1.16",
+    "torch>=2.4",
+]
+
+[tool.setuptools]
+include-package-data = true

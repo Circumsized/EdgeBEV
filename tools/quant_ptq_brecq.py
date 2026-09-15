@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-BEVFusion BRECQ (Block Reconstruction PTQ) — DDP 4-GPU
+EdgeBEV BRECQ (Block Reconstruction PTQ) — DDP 4-GPU
 ========================================================
 
 实验目的：
@@ -948,7 +948,7 @@ _RECON_ORDER = [
 def main():
     # 1. CLI（先解析，--help 不应被 GPU 检查拦截）
     parser = argparse.ArgumentParser(
-        description="BEVFusion BRECQ PTQ — DDP 4-GPU"
+        description="EdgeBEV BRECQ PTQ — DDP 4-GPU"
     )
     parser.add_argument("config", metavar="FILE", help="config file")
     parser.add_argument("--run-dir", metavar="DIR", help="run directory")
@@ -1027,7 +1027,7 @@ def main():
 
     if _is_main_rank():
         logger.info("=" * 60)
-        logger.info("BEVFusion BRECQ — DDP 4-GPU")
+        logger.info("EdgeBEV BRECQ — DDP 4-GPU")
         logger.info("=" * 60)
         logger.info(f"world_size={_world_size()}, rank={dist.rank() if distributed else 0}")
 

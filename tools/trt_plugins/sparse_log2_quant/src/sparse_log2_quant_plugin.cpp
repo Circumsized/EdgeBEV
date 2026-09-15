@@ -6,6 +6,7 @@
 #include "sparse_log2_quant_plugin.h"
 #include <cstring>
 #include <cstdio>
+#include <limits>
 
 // ── SparseLog2QuantPlugin 实现 ─────────────────────────────────────────────────
 
@@ -14,10 +15,18 @@ SparseLog2QuantPlugin::SparseLog2QuantPlugin(
 ) : mLog2Base(std::move(log2_base)),
     mPerChannel(per_channel),
     mLog2BaseDevice(nullptr),
-    mCachedC(0) {
+    mCachedC(0),
+    mLog2BaseLen(static_cast<int32_t>(mLog2Base.size())) {
 }
 
-SparseLog2QuantPlugin::SparseLog2QuantPlugin(const void* data, size_t length) {
+SparseLog2QuantPlugin::SparseLog2QuantPlugin(const void* data, size_t length)
+    : mPerChannel(false), mLog2BaseDevice(nullptr), mCachedC(0) {
+    // 头部固定开销：size_t(base_size) + int32_t(per_channel)
+    constexpr size_t kHeaderSize = sizeof(size_t) + sizeof(int32_t);
+    if (data == nullptr || length < kHeaderSize) {
+        return;
+    }
+
     const char* buf = static_cast<const char*>(data);
 
     // 反序列化 log2_base
@@ -25,18 +34,26 @@ SparseLog2QuantPlugin::SparseLog2QuantPlugin(const void* data, size_t length) {
     std::memcpy(&base_size, buf, sizeof(size_t));
     buf += sizeof(size_t);
 
+    // base_size 来自不可信输入：先校验浮动区长度，避免 resize/memcpy 越界或 bad_alloc
+    const size_t payload_bytes = length - kHeaderSize;
+    if (base_size > payload_bytes / sizeof(float)) {
+        return;
+    }
+
     mLog2Base.resize(base_size);
-    std::memcpy(mLog2Base.data(), buf, base_size * sizeof(float));
-    buf += base_size * sizeof(float);
+    if (base_size > 0) {
+        std::memcpy(mLog2Base.data(), buf, base_size * sizeof(float));
+        buf += base_size * sizeof(float);
+    }
 
     // 反序列化 per_channel
     int32_t per_ch_int = 0;
     std::memcpy(&per_ch_int, buf, sizeof(int32_t));
-    buf += sizeof(int32_t);
     mPerChannel = (per_ch_int != 0);
 
     mLog2BaseDevice = nullptr;
     mCachedC = static_cast<int32_t>(base_size);
+    mLog2BaseLen = static_cast<int32_t>(base_size);
 }
 
 SparseLog2QuantPlugin::~SparseLog2QuantPlugin() {
@@ -91,13 +108,20 @@ void SparseLog2QuantPlugin::configurePlugin(
 
     // 分配并拷贝 log2_base 到 GPU
     if (mLog2BaseDevice == nullptr && !mLog2Base.empty()) {
-        cudaMalloc(&mLog2BaseDevice, mLog2Base.size() * sizeof(float));
-        cudaMemcpy(
-            mLog2BaseDevice,
-            mLog2Base.data(),
-            mLog2Base.size() * sizeof(float),
-            cudaMemcpyHostToDevice
-        );
+        const size_t base_bytes = mLog2Base.size() * sizeof(float);
+        if (cudaMalloc(&mLog2BaseDevice, base_bytes) != cudaSuccess) {
+            mLog2BaseDevice = nullptr;
+            return;
+        }
+        if (cudaMemcpy(
+                mLog2BaseDevice,
+                mLog2Base.data(),
+                base_bytes,
+                cudaMemcpyHostToDevice
+            ) != cudaSuccess) {
+            cudaFree(mLog2BaseDevice);
+            mLog2BaseDevice = nullptr;
+        }
     }
 }
 
@@ -119,6 +143,18 @@ int32_t SparseLog2QuantPlugin::enqueue(
     void* workspace,
     cudaStream_t stream
 ) noexcept {
+    // 输入契约校验：指针、维度、dtype、GPU base 缓冲区
+    if (inputDesc == nullptr || outputDesc == nullptr ||
+        inputs == nullptr || outputs == nullptr ||
+        inputs[0] == nullptr || outputs[0] == nullptr ||
+        mLog2BaseDevice == nullptr || mLog2Base.empty()) {
+        return -1;
+    }
+    if (inputDesc[0].type != nvinfer1::DataType::kHALF ||
+        outputDesc[0].type != nvinfer1::DataType::kHALF) {
+        return -1;
+    }
+
     // 获取输入维度信息
     const auto& dims = inputDesc[0].dims;
     int32_t nb_dims = dims.nbDims;
@@ -128,6 +164,20 @@ int32_t SparseLog2QuantPlugin::enqueue(
     int32_t dim1 = (nb_dims > 1) ? dims.d[1] : 1;  // C
     int32_t dim2 = (nb_dims > 2) ? dims.d[2] : 1;  // H or D
     int32_t dim3 = (nb_dims > 3) ? dims.d[3] : 1;  // W
+
+    // 防止 dims.d[] (int64) 截断为 int32 时溢出/变负
+    if (dim0 < 0 || dim1 <= 0 || dim2 <= 0 || dim3 <= 0 ||
+        dims.d[0] > std::numeric_limits<int32_t>::max() ||
+        dims.d[1] > std::numeric_limits<int32_t>::max() ||
+        dims.d[2] > std::numeric_limits<int32_t>::max() ||
+        dims.d[3] > std::numeric_limits<int32_t>::max()) {
+        return -1;
+    }
+
+    // per-channel 模式下 log2_base 长度必须等于通道数 C，否则 kernel 内 log2_base[c] 越界
+    if (mPerChannel && mLog2BaseLen != dim1) {
+        return -1;
+    }
 
     // 调用 CUDA kernel
     launch_sparse_log2_quant(
@@ -142,6 +192,11 @@ int32_t SparseLog2QuantPlugin::enqueue(
         mPerChannel,
         stream
     );
+
+    // 检查 kernel launch 是否成功（异步错误在后续同步点暴露）
+    if (cudaGetLastError() != cudaSuccess) {
+        return -1;
+    }
 
     return 0;  // 成功
 }
@@ -218,16 +273,22 @@ nvinfer1::IPluginV2DynamicExt* SparseLog2QuantPlugin::clone() const noexcept {
 
     // 如果当前实例已分配 GPU 内存，也需要为 clone 分配
     if (mLog2BaseDevice != nullptr) {
-        cudaMalloc(&cloned->mLog2BaseDevice, mLog2Base.size() * sizeof(float));
-        cudaMemcpy(
-            cloned->mLog2BaseDevice,
-            mLog2BaseDevice,
-            mLog2Base.size() * sizeof(float),
-            cudaMemcpyDeviceToDevice
-        );
+        const size_t base_bytes = mLog2Base.size() * sizeof(float);
+        if (cudaMalloc(&cloned->mLog2BaseDevice, base_bytes) != cudaSuccess) {
+            cloned->mLog2BaseDevice = nullptr;
+        } else if (cudaMemcpy(
+                       cloned->mLog2BaseDevice,
+                       mLog2BaseDevice,
+                       base_bytes,
+                       cudaMemcpyDeviceToDevice
+                   ) != cudaSuccess) {
+            cudaFree(cloned->mLog2BaseDevice);
+            cloned->mLog2BaseDevice = nullptr;
+        }
     }
 
     cloned->mCachedC = mCachedC;
+    cloned->mLog2BaseLen = mLog2BaseLen;
     cloned->mNamespace = mNamespace;
 
     return cloned;
@@ -265,14 +326,30 @@ nvinfer1::IPluginV2* SparseLog2QuantPluginCreator::createPlugin(
     std::vector<float> log2_base;
     bool per_channel = false;
 
+    if (fc == nullptr || fc->nbFields < 0 ||
+        (fc->nbFields > 0 && fc->fields == nullptr)) {
+        return nullptr;
+    }
+
     // 解析 Plugin 字段
     for (int32_t i = 0; i < fc->nbFields; ++i) {
         const auto& field = fc->fields[i];
+        if (field.name == nullptr || field.data == nullptr) {
+            return nullptr;
+        }
 
         if (std::string(field.name) == "log2_base") {
+            if (field.type != nvinfer1::PluginFieldType::kFLOAT32 ||
+                field.length <= 0) {
+                return nullptr;
+            }
             const float* data = static_cast<const float*>(field.data);
             log2_base.assign(data, data + field.length);
         } else if (std::string(field.name) == "per_channel") {
+            if (field.type != nvinfer1::PluginFieldType::kINT32 ||
+                field.length != 1) {
+                return nullptr;
+            }
             per_channel = (*static_cast<const int32_t*>(field.data)) != 0;
         }
     }
@@ -291,6 +368,10 @@ nvinfer1::IPluginV2* SparseLog2QuantPluginCreator::deserializePlugin(
     const void* serialData,
     size_t serialLength
 ) noexcept {
+    constexpr size_t kHeaderSize = sizeof(size_t) + sizeof(int32_t);
+    if (serialData == nullptr || serialLength < kHeaderSize) {
+        return nullptr;
+    }
     return new SparseLog2QuantPlugin(serialData, serialLength);
 }
 

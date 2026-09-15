@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-BEVFusion PTQ (Post-Training Quantization) with MQBench — MinMax Calibration
-=============================================================================
+EdgeBEV PTQ (Post-Training Quantization) — MinMax Calibration
+=============================================================
 
 策略：对全模型 8/8 子模块进行 PTQ，采用三种量化路径覆盖所有模块：
 
@@ -409,6 +409,8 @@ class SparseLog2FakeQuantize(nn.Module):
         self.register_buffer('_fake_quant_enabled', torch.tensor(1, dtype=torch.uint8))
         self.register_buffer('fake_quant_enabled', torch.tensor(1, dtype=torch.uint8))
         self.register_buffer('_initialized', torch.tensor(0, dtype=torch.uint8))
+        # 一次性告警标志（非 buffer，避免进入 state_dict）
+        self._per_channel_fallback_warned = False
 
     # ── MQBench 兼容接口 ──────────────────────────────────────────────────
     def enable_observer(self, enabled=True):
@@ -442,15 +444,6 @@ class SparseLog2FakeQuantize(nn.Module):
             self.zero_point.detach().fill_(0)
         return self.scale, self.zero_point
 
-    @property
-    def scale(self):
-        """等效线性 scale = a^log_a_base（供诊断 / 日志使用）。"""
-        return torch.pow(self.log_base.float(), self.log2_base.float())
-
-    @property
-    def zero_point(self):
-        return torch.zeros(1, device=self.log2_base.device, dtype=torch.long)
-
     # ── 校准：估计 log2_base ─────────────────────────────────────────────
     def _update_base_per_tensor(self, x_nz_abs: torch.Tensor):
         """用非零绝对值的第 p 百分位更新 log2_base（EMA）。"""
@@ -459,7 +452,8 @@ class SparseLog2FakeQuantize(nn.Module):
             log2_vals = torch.log2(x_safe)
         else:
             log2_vals = torch.log(x_safe) / math.log(float(self.log_base.item()))
-        k = max(1, int(self.percentile * x_nz_abs.numel()))
+        numel = int(x_nz_abs.numel())
+        k = min(max(1, int(self.percentile * numel)), numel - 1)
         # sort().values[k]：第 k 小的 log2 值 = 第 p 百分位
         new_log2_base = log2_vals.sort().values[k].clamp(-20.0, 2.0)
         if not self._initialized.item():
@@ -480,6 +474,7 @@ class SparseLog2FakeQuantize(nn.Module):
             )
             self._initialized.fill_(0)
 
+        updated_any = False
         for c in range(C):
             x_c = x[:, c].detach().abs()
             nz_c = x_c[x_c > self.eps]
@@ -489,7 +484,7 @@ class SparseLog2FakeQuantize(nn.Module):
                 log2_c = torch.log2(nz_c)
             else:
                 log2_c = torch.log(nz_c) / math.log(float(self.log_base.item()))
-            k = max(1, int(self.percentile * nz_c.numel()))
+            k = min(max(1, int(self.percentile * nz_c.numel())), nz_c.numel() - 1)
             new_base_c = log2_c.sort().values[k].clamp(-20.0, 2.0)
             if not self._initialized.item():
                 self.log2_base[c] = new_base_c.item()
@@ -498,7 +493,9 @@ class SparseLog2FakeQuantize(nn.Module):
                         self.ema_ratio * self.log2_base[c]
                         + (1.0 - self.ema_ratio) * new_base_c.item()
                 )
-        self._initialized.fill_(1)
+            updated_any = True
+        if updated_any:
+            self._initialized.fill_(1)
 
     # ── 核心前向 ─────────────────────────────────────────────────────────
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -514,6 +511,15 @@ class SparseLog2FakeQuantize(nn.Module):
                         if x.ndim == 2:
                             self._update_base_per_channel(x.detach().float())  # ★ .float()
                         else:
+                            if not self._per_channel_fallback_warned:
+                                warnings.warn(
+                                    "SparseLog2FakeQuantize: per_channel=True 但输入非 2D "
+                                    f"(x.ndim={x.ndim})，本次退化为 per-tensor 估计 base；"
+                                    "per_channel 参数未按预期生效。",
+                                    RuntimeWarning,
+                                    stacklevel=2,
+                                )
+                                self._per_channel_fallback_warned = True
                             self._update_base_per_tensor(x_nz.abs().float())
 
         # ── 量化推理阶段 ─────────────────────────────────────────────────
@@ -564,6 +570,7 @@ def _report_log2_quantizer_results(model, logger):
             b = module.log2_base
             if module._initialized.item():
                 count += 1
+                module.calculate_qparams()
                 if b.numel() == 1:
                     log_base = float(module.log_base.item())
                     logger.info(
@@ -1316,42 +1323,111 @@ def _sync_log2_quantizer_state(model, observe: bool):
                 m.enable_fake_quant()
 
 
-def run_calibration(model, data_loader, num_batches, logger):
-    """
-    PTQ 校准：在校准数据上前向推理，收集各层激活值统计量。
-
-    Round 9 更新：SparseLog2FakeQuantize 节点与 MQBench 状态同步。
-
-    流程：
-      enable_calibration → sync_log2(observe=True) →
-      运行 num_batches → enable_quantization → sync_log2(observe=False)
-    """
+def run_calibration(model, data_loader, num_batches, logger, allow_failures=False,
+                    max_failure_rate=0.0):
+    """Run calibration and enforce a valid observer state before quantization."""
     logger.info(f"开始校准，共使用 {num_batches} 个 batch ...")
-
     enable_calibration(model)
-    _sync_log2_quantizer_state(model, observe=True)  # ★ Round 9
+    _sync_log2_quantizer_state(model, observe=True)
     model.eval()
 
+    attempted = 0
+    succeeded = 0
+    failures = []
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             if i >= num_batches:
                 break
+            attempted += 1
             try:
                 model(return_loss=False, rescale=True, **data)
-            except Exception as e:
-                logger.warning(f"  校准 batch {i} 出错（已跳过）: {e}")
-                continue
-            if (i + 1) % 10 == 0:
-                logger.info(f"  校准进度: {i + 1}/{num_batches}")
+                succeeded += 1
+            except Exception as exc:
+                failures.append({"batch": i, "error": f"{type(exc).__name__}: {exc}"})
+                logger.warning(f"  校准 batch {i} 出错: {exc}")
+            if attempted % 10 == 0:
+                logger.info(f"  校准进度: {attempted}/{num_batches}")
 
-    logger.info("校准完成，scale/zero_point 已确定。")
+    failure_rate = len(failures) / float(max(attempted, 1))
+    logger.info(
+        f"校准完成: attempted={attempted}, succeeded={succeeded}, "
+        f"failed={len(failures)}, failure_rate={failure_rate:.4f}"
+    )
+    if attempted == 0:
+        raise RuntimeError("Calibration produced no batches")
+    if not allow_failures and failures:
+        raise RuntimeError(f"Calibration failed for {len(failures)} batch(es)")
+    if failure_rate > max_failure_rate:
+        raise RuntimeError(
+            f"Calibration failure rate {failure_rate:.4f} exceeds "
+            f"max_failure_rate {max_failure_rate:.4f}"
+        )
 
+    _validate_quantizer_state(model, logger)
     _report_kl_observer_results(model, logger)
-    _report_log2_quantizer_results(model, logger)  # ★ Round 9
-
+    _report_log2_quantizer_results(model, logger)
     enable_quantization(model)
-    _sync_log2_quantizer_state(model, observe=False)  # ★ Round 9
+    _sync_log2_quantizer_state(model, observe=False)
+    _validate_quantizer_state(model, logger)
     logger.info("模型已切换为量化推理模式（FakeQuant 激活）。")
+    return {
+        "attempted": attempted,
+        "succeeded": succeeded,
+        "failed": len(failures),
+        "failure_rate": failure_rate,
+        "failures": failures,
+    }
+
+
+def _validate_quantizer_state(model, logger):
+    inner = model.module if hasattr(model, "module") else model
+    invalid = []
+    checked = 0
+    for name, module in inner.named_modules():
+        observers = []
+        # fx 路径（MQBench 插桩）暴露 activation_post_process
+        observer = getattr(module, "activation_post_process", None)
+        if observer is not None:
+            observers.append((name, observer))
+        elif isinstance(module, (KLDivergenceObserver, SparseLog2FakeQuantize)):
+            observers.append((name, module))
+
+        # 手工量化路径：_QuantizedConv2d/Linear 持有 act_fake_quant/weight_fake_quant；
+        # _QuantizedSparseConv 额外可能持有 SparseLog2FakeQuantize 类型的 act_fake_quant
+        for attr in ("act_fake_quant", "weight_fake_quant"):
+            fake_quant = getattr(module, attr, None)
+            if isinstance(fake_quant, (LearnableFakeQuantize, SparseLog2FakeQuantize)):
+                observers.append((f"{name}.{attr}", fake_quant))
+
+        for obs_name, obs in observers:
+            # MQBench 的 LearnableFakeQuantize 把 min_val/max_val/scale 存在内部 .observer 上；
+            # 若直接对 fake_quant 取属性会取不到，导致校验被静默跳过（fail-open）。
+            inner_obs = getattr(obs, "observer", None)
+            value_holder = inner_obs if inner_obs is not None else obs
+            checked += 1
+            for attr in ("min_val", "max_val", "scale", "zero_point"):
+                value = getattr(value_holder, attr, None)
+                if value is not None and torch.is_tensor(value) and not torch.isfinite(value).all():
+                    invalid.append(f"{obs_name}.{attr}")
+                # 未更新的 observer 哨兵态：min=+inf / max=-inf
+                if attr == "min_val" and value is not None and torch.is_tensor(value):
+                    if bool((value == float("inf")).any()):
+                        invalid.append(f"{obs_name}.{attr}(uninitialized)")
+                if attr == "max_val" and value is not None and torch.is_tensor(value):
+                    if bool((value == float("-inf")).any()):
+                        invalid.append(f"{obs_name}.{attr}(uninitialized)")
+            if isinstance(obs, SparseLog2FakeQuantize):
+                initialized = getattr(obs, "_initialized", None)
+                if initialized is not None and int(initialized.item()) == 0:
+                    invalid.append(f"{obs_name}._initialized")
+                log2_base = getattr(obs, "log2_base", None)
+                if log2_base is not None and torch.is_tensor(log2_base) and not torch.isfinite(log2_base).all():
+                    invalid.append(f"{obs_name}.log2_base")
+    if checked == 0:
+        raise RuntimeError("No quantizer observers found after calibration")
+    if invalid:
+        raise RuntimeError(f"Invalid quantizer state: {invalid[:10]}")
+    logger.info(f"量化器状态校验通过: checked={checked}")
 
 
 def _report_kl_observer_results(model, logger):
@@ -1485,11 +1561,15 @@ def evaluate_quantized_model(model, data_loader, dataset, cfg, logger):
     outputs = single_gpu_test(model, data_loader)
     logger.info(f"量化模型推理完成，共处理 {len(outputs)} 个样本。")
 
-    eval_kwargs = cfg.get("evaluation", {}).copy()
+    eval_cfg = cfg.get("evaluation", None)
+    eval_kwargs = dict(eval_cfg) if eval_cfg else {}
     # 去掉训练专用 key
     for key in ("interval", "tmpdir", "start", "gpu_collect", "save_best", "rule", "dynamic_intervals"):
         eval_kwargs.pop(key, None)
-    eval_kwargs.update(dict(metric="bbox"))
+    # metric 未显式指定时从 test 数据集类型推导，避免 seg/联合配置下硬编码 bbox 崩溃
+    if "metric" not in eval_kwargs:
+        test_type = cfg.get("data", {}).get("test", {}).get("type", "")
+        eval_kwargs["metric"] = "segm" if "Seg" in test_type else "bbox"
 
     logger.info("计算量化模型 NDS / mAP ...")
     metrics = dataset.evaluate(outputs, **eval_kwargs)
@@ -1740,7 +1820,7 @@ def main():
             torch.cuda.set_device(0)
 
     parser = argparse.ArgumentParser(
-        description="BEVFusion PTQ (MinMax) with MQBench — Selective Quantization"
+        description="EdgeBEV PTQ (MinMax) — Selective Quantization"
     )
     parser.add_argument("config", metavar="FILE", help="config file")
     parser.add_argument("--run-dir", metavar="DIR", help="run directory")
@@ -1832,6 +1912,24 @@ def main():
         action="store_true",
         help="shuffle calibration data for better scene diversity (default: False, sequential).",
     )
+    parser.add_argument(
+        "--allow-calibration-failures",
+        action="store_true",
+        help="allow calibration failures when the failure rate stays within the configured limit",
+    )
+    parser.add_argument(
+        "--max-calibration-failure-rate",
+        type=float,
+        default=0.0,
+        help="maximum allowed calibration failure rate (default: 0.0)",
+    )
+    parser.add_argument(
+        "--allow-partial-quant",
+        action="store_true",
+        help="allow continuing when some submodules fail to quantize; "
+             "by default any quantization failure aborts before saving the "
+             "checkpoint (fail-closed).",
+    )
     # vtransform 专用激活 Observer 选择
     parser.add_argument(
         "--vtransform-observer",
@@ -1852,6 +1950,8 @@ def main():
     args, opts = parser.parse_known_args()
     if args.log_base <= 1.0:
         raise ValueError(f"--log-base must be > 1.0, got {args.log_base}")
+    if not 0.0 <= args.max_calibration_failure_rate <= 1.0:
+        raise ValueError("--max-calibration-failure-rate must be between 0 and 1")
 
     configs.load(args.config, recursive=True)
     configs.update(opts)
@@ -1875,7 +1975,7 @@ def main():
     logger = get_root_logger(log_file=log_file)
 
     logger.info("=" * 60)
-    logger.info("BEVFusion PTQ — MinMax 选择性量化")
+    logger.info("EdgeBEV PTQ — MinMax 选择性量化")
     logger.info("=" * 60)
     logger.info(f"配置文件:\n{cfg}")
 
@@ -1884,9 +1984,15 @@ def main():
         random.seed(cfg.seed)
         np.random.seed(cfg.seed)
         torch.manual_seed(cfg.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(cfg.seed)
         if cfg.deterministic:
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
+    else:
+        logger.warning(
+            "cfg.seed 为 None：校准/评估结果不可复现，且 --calib-shuffle 的子集选择将随机。"
+        )
 
     # ------------------------------------------------------------------
     # Step 1: 构建校准数据集
@@ -2029,18 +2135,20 @@ def main():
         logger.info(f"║  LWC     : ON (lr={args.lwc_lr}, iters={args.lwc_iters})")
     if quant_failed:
         logger.warning("║")
-        logger.warning("║  ⚠️  有模块量化失败！如果结果不符合预期，请 Ctrl+C 停止。")
-        logger.warning("║  ⚠️  失败模块将以 FP32 运行，不影响正确性，但会降低量化覆盖率。")
+        logger.warning("║  ⚠️  有模块量化失败！失败模块将以 FP32 运行，会降低量化覆盖率。")
     else:
         logger.info("║  ✅  所有预期模块均量化成功！")
     logger.info("╚══════════════════════════════════════════════════════════════╝")
     logger.info("")
 
+    if quant_failed and not getattr(args, "allow_partial_quant", False):
+        logger.error(
+            "检测到量化失败模块且未启用 --allow-partial-quant："
+            f"{quant_failed}。为避免产出被误标记为已完成的 PTQ 产物，流程中止。"
+        )
+        raise SystemExit(1)
     if quant_failed:
-        logger.warning(f"⏳ 5 秒后自动继续校准...（如需停止请按 Ctrl+C）")
-        for i in range(5, 0, -1):
-            logger.warning(f"   继续倒计时: {i}s ...")
-            time.sleep(1)
+        logger.warning("已启用 --allow-partial-quant，将继续校准（失败模块以 FP32 运行）。")
     logger.info("→ 开始校准，预计耗时较长，请勿中断...")
     logger.info("")
 
@@ -2049,7 +2157,14 @@ def main():
     # ------------------------------------------------------------------
     logger.info(
         f"MinMax 校准阶段：{args.calib_batches} 个 batch，{'随机采样' if args.calib_shuffle else '顺序采样（仅前几个场景）'}")
-    run_calibration(model, calib_loader, num_batches=args.calib_batches, logger=logger)
+    calibration_stats = run_calibration(
+        model,
+        calib_loader,
+        num_batches=args.calib_batches,
+        logger=logger,
+        allow_failures=args.allow_calibration_failures,
+        max_failure_rate=args.max_calibration_failure_rate,
+    )
 
     # ------------------------------------------------------------------
     # Step 4: 量化诊断（可选）
@@ -2077,20 +2192,19 @@ def main():
         "sparse_log_base": args.log_base if args.act_observer == "log2" else None,
         "sparse_act_mode": args.sparse_act_mode,
         "vtransform_act_observer": args.vtransform_observer or "ema_minmax",
-        "quantized_modules": [k for k, _ in _QUANTIZABLE_SUBMODULE_KEYS]
-                             + ["heads/*"],
-        "skipped_modules": [
-            "camera/vtransform",
-            "lidar/voxelize",
-            "lidar/backbone (SparseEncoder)",
-        ],
+        "quantized_modules": list(quant_success),
+        "quantization_failed_modules": list(quant_failed),
+        "skipped_modules": list(args.skip_modules),
+        "calibration": calibration_stats,
     }
     if args.lwc:
         meta["lwc"] = {"lr": args.lwc_lr, "iters": args.lwc_iters}
+    tmp_path = f"{save_path}.tmp"
     torch.save(
         {"state_dict": inner_model.state_dict(), "meta": meta},
-        save_path,
+        tmp_path,
     )
+    os.replace(tmp_path, save_path)
     logger.info(f"PTQ 量化模型已保存至: {save_path}")
 
     logger.info("PTQ (MinMax) 流程完成！")

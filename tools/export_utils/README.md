@@ -1,4 +1,4 @@
-# BEVFusion TensorRT 部署工具集
+# EdgeBEV TensorRT 部署工具集
 
 ## 目录结构
 
@@ -20,9 +20,9 @@ tools/export_utils/
 
 ```bash
 # 1. 激活环境
-conda activate bevfusion_mqbench
-export LD_LIBRARY_PATH=/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/lib:$LD_LIBRARY_PATH
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate edgebev_research
+export LD_LIBRARY_PATH=<TRT_ROOT>/lib:$LD_LIBRARY_PATH
+cd <REMOTE_ROOT>/EdgeBEV
 
 # 2. 一键执行 Phase 1
 python tools/export_utils/phase1_swin_export.py

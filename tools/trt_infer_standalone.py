@@ -5,7 +5,7 @@ Runs in spconv23_deploy environment (Python 3.9, PyTorch 2.0, spconv 2.3.8, TRT 
 No mmcv/mmdet3d dependency for core inference — only for dataset loading and NDS evaluation.
 
 Usage:
-    conda run --prefix /media/yellowstone/data2/CYL/spconv23_deploy \
+    conda run --prefix <REMOTE_ROOT>/envs/spconv23_deploy \
         python tools/trt_infer_standalone.py \
         --config configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
         --ckpt pretrained/bevfusion-det.pth \
@@ -32,7 +32,7 @@ import torch.nn as nn
 # ============================================================================
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "build_sp39"))
+sys.path.insert(0, os.path.join(ROOT, "build_deploy"))
 
 # Enable standalone mode to skip broken CUDA extensions in mmdet3d.ops
 os.environ["BEVFUSION_STANDALONE"] = "1"
@@ -48,11 +48,7 @@ sys.modules["mmdet3d.ops.bev_pool.bev_pool_ext"] = _bev_pool_ext
 sys.modules["mmdet3d.ops.voxel.voxel_layer"] = _voxel_layer
 sys.modules["mmdet3d.ops.iou3d.iou3d_cuda"] = _iou3d_cuda
 sys.modules["mmdet3d.ops.roiaware_pool3d.roiaware_pool3d_ext"] = _roiaware_pool3d_ext
-sys.modules["mmdet3d.ops.bev_pool.bev_pool_ext"] = _bev_pool_ext
-sys.modules["mmdet3d.ops.voxel.voxel_layer"] = _voxel_layer
-sys.modules["mmdet3d.ops.iou3d.iou3d_cuda"] = _iou3d_cuda
 
-import tensorrt as trt
 from mmcv import Config
 from torchpack.utils.config import configs
 
@@ -60,6 +56,8 @@ from mmdet3d.datasets import build_dataloader, build_dataset
 from mmdet3d.utils import recursive_eval
 
 import spconv.pytorch as spconv
+
+from tools.engine_utils import TRTRunner
 
 
 def _summarize_tensor(arr):
@@ -93,66 +91,9 @@ def _summarize_tensor(arr):
 
 
 # ============================================================================
-# TRT Engine Runner
+# TRTRunner: imported from tools.engine_utils
+# (unified implementation with output buffer reuse + CUDA stream control)
 # ============================================================================
-
-class TRTRunner:
-    """Runs a TRT engine using torch CUDA tensors."""
-
-    def __init__(self, engine_path, logger=None):
-        self.logger = logger or logging.getLogger(__name__)
-        trt_logger = trt.Logger(trt.Logger.WARNING)
-        runtime = trt.Runtime(trt_logger)
-        with open(engine_path, "rb") as f:
-            self.engine = runtime.deserialize_cuda_engine(f.read())
-        if self.engine is None:
-            raise RuntimeError(f"Failed to load TRT engine: {engine_path}")
-        self.context = self.engine.create_execution_context()
-
-        self.input_names = []
-        self.output_names = []
-        self.output_shapes = {}
-        self.output_dtypes = {}
-        for i in range(self.engine.num_io_tensors):
-            name = self.engine.get_tensor_name(i)
-            mode = self.engine.get_tensor_mode(name)
-            if mode == trt.TensorIOMode.INPUT:
-                self.input_names.append(name)
-            else:
-                self.output_names.append(name)
-                self.output_shapes[name] = tuple(self.engine.get_tensor_shape(name))
-                dtype_trt = self.engine.get_tensor_dtype(name)
-                if dtype_trt == trt.float16:
-                    self.output_dtypes[name] = torch.float16
-                else:
-                    self.output_dtypes[name] = torch.float32
-
-        self.logger.info(
-            f"TRT engine loaded: {engine_path} "
-            f"(inputs={self.input_names}, outputs={self.output_names})"
-        )
-
-    def __call__(self, *inputs):
-        assert len(inputs) == len(self.input_names)
-        for name, tensor in zip(self.input_names, inputs):
-            t = tensor.contiguous()
-            if t.dtype == torch.float64:
-                t = t.float()
-            self.context.set_input_shape(name, tuple(t.shape))
-            self.context.set_tensor_address(name, t.data_ptr())
-
-        outputs = {}
-        for name in self.output_names:
-            shape = tuple(self.context.get_tensor_shape(name))
-            dtype = self.output_dtypes[name]
-            t = torch.zeros(shape, dtype=dtype, device="cuda").contiguous()
-            self.context.set_tensor_address(name, t.data_ptr())
-            outputs[name] = t
-
-        stream = torch.cuda.current_stream().cuda_stream
-        self.context.execute_async_v3(stream_handle=stream)
-        torch.cuda.synchronize()
-        return [outputs[name] for name in self.output_names]
 
 
 # ============================================================================
@@ -896,15 +837,8 @@ class StandaloneBEVFusion(nn.Module):
 
         # Step 1: SwinT backbone (TRT)
         img_flat = img.view(B * N, C, H, W).float()
-        swin_outputs = []
-        for i in range(B * N):
-            outs = self.swin_trt(img_flat[i:i+1])
-            swin_outputs.append([o.float() for o in outs])
-        num_scales = len(swin_outputs[0])
-        multi_scale_feats = []
-        for s in range(num_scales):
-            feat = torch.cat([swin_outputs[i][s] for i in range(B * N)], dim=0)
-            multi_scale_feats.append(feat)
+        swin_outputs = self.swin_trt.run_batched(img_flat)
+        multi_scale_feats = [feat.float() for feat in swin_outputs]
 
         # Step 2: Camera neck (TRT)
         neck_out = self.neck_trt(
@@ -995,11 +929,11 @@ class StandaloneBEVFusion(nn.Module):
             feats_fp16 = feats.half().cuda()  # keep as torch.Tensor on GPU
             feats_tv = tv.from_blob(feats_fp16.data_ptr(),
                                     list(feats_fp16.shape), tv.float16, 0)
-            coords_np = coords.cpu().numpy().astype(np.int32)
-            coords_i32 = torch.from_numpy(coords_np).cuda().contiguous()
-            coords_tv = tv.from_blob(coords_i32.data_ptr(),
-                                     list(coords_i32.shape), tv.int32, 0)
-            batch_size = int(coords[-1, 0].item()) + 1
+            coords_i32 = coords.int().contiguous()
+            coords_tv = tv.from_blob(
+                coords_i32.data_ptr(), list(coords_i32.shape), tv.int32, 0
+            )
+            batch_size = int(coords_i32[-1, 0].item()) + 1
 
             def _run_tv_lidar():
                 try:

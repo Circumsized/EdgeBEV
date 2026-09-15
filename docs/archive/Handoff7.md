@@ -1,4 +1,4 @@
-## Phase 7：Standalone 推理脚本（去 bevfusion_mqbench 环境）— 工作交接（2026-03-30）
+## Phase 7：Standalone 推理脚本（去 edgebev_research 环境）— 工作交接（2026-03-30）
 
 ### 总体进度
 
@@ -30,7 +30,7 @@
 
 #### 2. CUDA 扩展重新编译（cpython-39）
 
-新建 `tools/build_cuda_ext.py`，用 `torch.utils.cpp_extension.load()` JIT 编译 4 个 CUDA 扩展到 `build_sp39/`：
+新建 `tools/build_cuda_ext.py`，用 `torch.utils.cpp_extension.load()` JIT 编译 4 个 CUDA 扩展到 `build_deploy/`：
 
 | 扩展 | 源码 | 关键点 |
 |------|------|--------|
@@ -44,7 +44,7 @@
 修改 `mmdet3d/ops/__init__.py`，增加 `BEVFUSION_STANDALONE` 环境变量开关：
 - `BEVFUSION_STANDALONE=1` 时只导入 bev_pool、voxel、norm、roiaware_pool3d
 - 跳过 ball_query、furthest_point_sample、interpolate、knn、paconv、sparse_block 等依赖 cpython-38 .so 的模块
-- 原有 bevfusion_mqbench 环境不受影响（环境变量未设置时走原路径）
+- 原有 edgebev_research 环境不受影响（环境变量未设置时走原路径）
 
 #### 4. 新建 `tools/trt_infer_standalone.py`（~1260 行）
 
@@ -83,8 +83,8 @@ Detections: 200 total, 3 with score > 0.3
 
 | 配置 | NDS | mAP | 环境 | 说明 |
 |------|-----|-----|------|------|
-| FP32 baseline | 0.7069 | 0.6728 | bevfusion_mqbench | 原始模型 |
-| Phase 6 (LiDAR FP32) | 0.7040 | 0.6654 | bevfusion_mqbench | trt_infer.py |
+| FP32 baseline | 0.7069 | 0.6728 | edgebev_research | 原始模型 |
+| Phase 6 (LiDAR FP32) | 0.7040 | 0.6654 | edgebev_research | trt_infer.py |
 | Phase 7 standalone (LiDAR FP16) | **待跑** | **待跑** | spconv23_deploy | 预期 ≈ 0.7040 |
 | Phase 7 standalone (LiDAR Log2 INT8) | **待跑** | **待跑** | spconv23_deploy | 预期 ≈ 0.6875 |
 
@@ -95,8 +95,8 @@ Detections: 200 total, 3 with score > 0.3
 命令见 `docs/deploy_cmd.md` 第 6 节。需要 GPU 空闲时跑：
 
 ```bash
-conda activate /media/yellowstone/data2/CYL/spconv23_deploy
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+conda activate <REMOTE_ROOT>/envs/spconv23_deploy
+cd <REMOTE_ROOT>/EdgeBEV
 
 # LiDAR FP16
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 \
@@ -142,7 +142,7 @@ python -u tools/trt_infer_standalone.py \
 # Phase 7 新建
 tools/trt_infer_standalone.py              — 独立推理脚本（spconv23_deploy 环境）
 tools/build_cuda_ext.py                    — CUDA 扩展编译脚本
-build_sp39/                                — 编译好的 cpython-39 CUDA 扩展
+build_deploy/                                — 编译好的 cpython-39 CUDA 扩展
     bev_pool_ext.so
     voxel_layer.so
     iou3d_cuda.so
@@ -154,7 +154,7 @@ mmdet (site-packages)                      — patch mmcv_maximum_version → 1.
 docs/deploy_cmd.md                         — 新增第 6 节 standalone 命令
 
 # 环境
-/media/yellowstone/data2/CYL/spconv23_deploy/  — conda 环境
+<REMOTE_ROOT>/envs/spconv23_deploy/  — conda 环境
     Python 3.9 + PyTorch 2.0 + spconv 2.3.8 + TRT 10.15
     mmcv-full 1.7.2 + mmdet 2.20.0
     nuscenes-devkit + torchpack + numba
@@ -162,7 +162,7 @@ docs/deploy_cmd.md                         — 新增第 6 节 standalone 命令
 
 ### 两个环境对比
 
-| | bevfusion_mqbench | spconv23_deploy |
+| | edgebev_research | spconv23_deploy |
 |---|---|---|
 | Python | 3.8 | 3.9 |
 | PyTorch | 1.10.2 | 2.0.1 |
@@ -172,7 +172,7 @@ docs/deploy_cmd.md                         — 新增第 6 节 standalone 命令
 | mmdet | 2.20.0 | 2.20.0 |
 | MQBench | 0.0.6 | 无（FakeQuant 内联实现） |
 | 推理脚本 | tools/trt_infer.py | tools/trt_infer_standalone.py |
-| CUDA ext | cpython-38 (setup.py) | cpython-39 (JIT, build_sp39/) |
+| CUDA ext | cpython-38 (setup.py) | cpython-39 (JIT, build_deploy/) |
 
 ### 量化方案说明
 

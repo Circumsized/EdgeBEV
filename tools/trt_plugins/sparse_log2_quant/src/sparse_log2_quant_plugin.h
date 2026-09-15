@@ -149,6 +149,7 @@ private:
     float*             mLog2BaseDevice; // GPU 上的 log2_base
     std::string        mNamespace;      // Plugin namespace
     int32_t            mCachedC;        // 缓存的通道数（用于动态 shape）
+    int32_t            mLog2BaseLen;    // log2_base 元素个数（per-channel 时等于 C）
 };
 
 /**

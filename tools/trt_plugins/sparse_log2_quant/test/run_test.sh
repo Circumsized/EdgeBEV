@@ -6,7 +6,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 PLUGIN_BUILD_DIR="${SCRIPT_DIR}/../build"
-TRT_ROOT="/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6"
+TRT_ROOT="${TRT_ROOT:?Set TRT_ROOT to the TensorRT installation prefix}"
 
 # Check if executable exists
 if [ ! -f "${BUILD_DIR}/test_plugin_registration" ]; then

@@ -4,6 +4,7 @@
 #include "bev_pool_v2_plugin.h"
 #include <cstring>
 #include <iostream>
+#include <limits>
 
 // Constructor from ONNX attributes
 // B: batch size, D: depth (Z), H: height (Y), W: width (X)
@@ -11,15 +12,70 @@ BEVPoolV2Plugin::BEVPoolV2Plugin(int B, int D, int H, int W)
     : mB(B), mD(D), mH(H), mW(W) {}
 
 // Constructor from serialized data
-BEVPoolV2Plugin::BEVPoolV2Plugin(const void* data, size_t length) {
+BEVPoolV2Plugin::BEVPoolV2Plugin(const void* data, size_t length)
+    : mB(0), mD(0), mH(0), mW(0) {
+    if (data == nullptr || length < 4 * sizeof(int)) {
+        return;
+    }
     const char* buf = static_cast<const char*>(data);
     memcpy(&mB, buf, sizeof(int)); buf += sizeof(int);
     memcpy(&mD, buf, sizeof(int)); buf += sizeof(int);
     memcpy(&mH, buf, sizeof(int)); buf += sizeof(int);
     memcpy(&mW, buf, sizeof(int));
+    if (mB <= 0 || mD <= 0 || mH <= 0 || mW <= 0) {
+        mB = mD = mH = mW = 0;
+    }
 }
 
 BEVPoolV2Plugin::~BEVPoolV2Plugin() {}
+
+bool BEVPoolV2Plugin::validate_input_contract(
+    const nvinfer1::PluginTensorDesc* const inputDesc,
+    int32_t nbInputs,
+    const nvinfer1::PluginTensorDesc* const outputDesc,
+    int32_t nbOutputs,
+    const void* const* const inputs,
+    void* const* const outputs) const noexcept {
+    if (inputDesc == nullptr || outputDesc == nullptr ||
+        inputs == nullptr || outputs == nullptr || nbInputs != 4 || nbOutputs != 1 ||
+        mB <= 0 || mD <= 0 || mH <= 0 || mW <= 0 ||
+        inputs[0] == nullptr || inputs[1] == nullptr || inputs[2] == nullptr ||
+        inputs[3] == nullptr || outputs[0] == nullptr) {
+        return false;
+    }
+    if (inputDesc[0].dims.nbDims != 2 || inputDesc[1].dims.nbDims != 2 ||
+        inputDesc[2].dims.nbDims != 1 || inputDesc[3].dims.nbDims != 1 ||
+        outputDesc[0].dims.nbDims != 5) {
+        return false;
+    }
+    const int64_t n = inputDesc[0].dims.d[0];
+    const int64_t c = inputDesc[0].dims.d[1];
+    const int64_t geom_n = inputDesc[1].dims.d[0];
+    const int64_t geom_width = inputDesc[1].dims.d[1];
+    const int64_t starts_n = inputDesc[2].dims.d[0];
+    const int64_t lengths_n = inputDesc[3].dims.d[0];
+    if (n < 0 || c <= 0 || geom_n != n || geom_width != 4 ||
+        starts_n < 0 || lengths_n != starts_n) {
+        return false;
+    }
+    if (outputDesc[0].dims.d[0] != mB || outputDesc[0].dims.d[1] != mD ||
+        outputDesc[0].dims.d[2] != mH || outputDesc[0].dims.d[3] != mW ||
+        outputDesc[0].dims.d[4] != c) {
+        return false;
+    }
+    if (n > std::numeric_limits<int>::max() || c > std::numeric_limits<int>::max() ||
+        starts_n > std::numeric_limits<int>::max()) {
+        return false;
+    }
+    if (inputDesc[0].type != nvinfer1::DataType::kFLOAT ||
+        inputDesc[1].type != nvinfer1::DataType::kINT32 ||
+        inputDesc[2].type != nvinfer1::DataType::kINT32 ||
+        inputDesc[3].type != nvinfer1::DataType::kINT32 ||
+        outputDesc[0].type != nvinfer1::DataType::kFLOAT) {
+        return false;
+    }
+    return true;
+}
 
 // Output dimensions: [B, D, H, W, C] where C comes from input x
 nvinfer1::DimsExprs BEVPoolV2Plugin::getOutputDimensions(
@@ -27,13 +83,20 @@ nvinfer1::DimsExprs BEVPoolV2Plugin::getOutputDimensions(
     const nvinfer1::DimsExprs* inputs,
     int32_t nbInputs,
     nvinfer1::IExprBuilder& exprBuilder) noexcept {
-    
+    nvinfer1::DimsExprs output{};
+    if (outputIndex != 0 || inputs == nullptr || nbInputs != 4 ||
+        inputs[0].nbDims != 2 || inputs[1].nbDims != 2 ||
+        inputs[2].nbDims != 1 || inputs[3].nbDims != 1 ||
+        mB <= 0 || mD <= 0 || mH <= 0 || mW <= 0) {
+        output.nbDims = 0;
+        return output;
+    }
+
     // inputs[0] = x: [N, C] - flattened features
     // inputs[1] = geom_feats: [N, 4] - coordinates
     // inputs[2] = interval_starts: [M]
     // inputs[3] = interval_lengths: [M]
     
-    nvinfer1::DimsExprs output;
     output.nbDims = 5;
     output.d[0] = exprBuilder.constant(mB);  // B
     output.d[1] = exprBuilder.constant(mD);  // D (Z)
@@ -49,7 +112,11 @@ bool BEVPoolV2Plugin::supportsFormatCombination(
     const nvinfer1::PluginTensorDesc* inOut,
     int32_t nbInputs,
     int32_t nbOutputs) noexcept {
-    
+    if (inOut == nullptr || nbInputs != 4 || nbOutputs != 1 ||
+        pos < 0 || pos >= nbInputs + nbOutputs) {
+        return false;
+    }
+
     // Support FP32 for all inputs/outputs
     // pos 0: x [N, C], pos 1: geom_feats [N, 4], pos 2: interval_starts [M], pos 3: interval_lengths [M]
     // pos 4: output [B, D, H, W, C]
@@ -92,8 +159,12 @@ int32_t BEVPoolV2Plugin::enqueue(
     void* const* outputs,
     void* workspace,
     cudaStream_t stream) noexcept {
-    
-    // Get dimensions
+    constexpr int32_t kInputCount = 4;
+    constexpr int32_t kOutputCount = 1;
+    if (!validate_input_contract(inputDesc, kInputCount, outputDesc, kOutputCount, inputs, outputs)) {
+        return -1;
+    }
+
     const auto& x_dims = inputDesc[0].dims;           // [N, C]
     const auto& interval_dims = inputDesc[3].dims;    // [M]
     
@@ -106,13 +177,23 @@ int32_t BEVPoolV2Plugin::enqueue(
     const int* interval_starts = static_cast<const int*>(inputs[2]);
     const int* interval_lengths = static_cast<const int*>(inputs[3]);
     float* out = static_cast<float*>(outputs[0]);
+
+    const size_t output_elements = static_cast<size_t>(mB) * mD * mH * mW * C;
+    if (cudaMemsetAsync(out, 0, output_elements * sizeof(float), stream) != cudaSuccess) {
+        return -1;
+    }
     
     launch_bev_pool_v2(
-        mB, mD, mH, mW, n_intervals, C,
+        mB, mD, mH, mW, N, n_intervals, C,
         x, geom_feats, interval_starts, interval_lengths,
         out, stream
     );
-    
+
+    // kernel launch 失败（非法配置/资源不足）在这里捕获；异步执行期错误在后续同步点暴露
+    if (cudaGetLastError() != cudaSuccess) {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -198,23 +279,39 @@ nvinfer1::IPluginV2* BEVPoolV2PluginCreator::createPlugin(
     const char* name,
     const nvinfer1::PluginFieldCollection* fc) noexcept {
     
-    int B = 1, D = 118, H = 128, W = 128;  // Default values
-    
+    // B/D/H/W 均为必需的输出 shape 参数；任一缺失即视为配置错误，拒绝创建
+    int B = 0, D = 0, H = 0, W = 0;
+    bool has_B = false, has_D = false, has_H = false, has_W = false;
+    if (fc == nullptr || fc->nbFields < 0 ||
+        (fc->nbFields > 0 && fc->fields == nullptr)) {
+        return nullptr;
+    }
+
     for (int i = 0; i < fc->nbFields; ++i) {
         const auto& f = fc->fields[i];
-        if (!f.data) continue;  // Skip null data
-        
+        if (f.name == nullptr || f.data == nullptr || f.length != 1 ||
+            f.type != nvinfer1::PluginFieldType::kINT32) {
+            return nullptr;
+        }
         if (std::string(f.name) == "B") {
-            B = *static_cast<const int*>(f.data);
+            B = *static_cast<const int*>(f.data); has_B = true;
         } else if (std::string(f.name) == "D") {
-            D = *static_cast<const int*>(f.data);
+            D = *static_cast<const int*>(f.data); has_D = true;
         } else if (std::string(f.name) == "H") {
-            H = *static_cast<const int*>(f.data);
+            H = *static_cast<const int*>(f.data); has_H = true;
         } else if (std::string(f.name) == "W") {
-            W = *static_cast<const int*>(f.data);
+            W = *static_cast<const int*>(f.data); has_W = true;
+        } else {
+            // 未识别的字段名：拒绝，避免拼写错误被静默忽略
+            return nullptr;
         }
     }
-    
+    if (!has_B || !has_D || !has_H || !has_W) {
+        return nullptr;
+    }
+    if (B <= 0 || D <= 0 || H <= 0 || W <= 0) {
+        return nullptr;
+    }
     return new BEVPoolV2Plugin(B, D, H, W);
 }
 
@@ -222,6 +319,10 @@ nvinfer1::IPluginV2* BEVPoolV2PluginCreator::deserializePlugin(
     const char* name,
     const void* serialData,
     size_t serialLength) noexcept {
+    constexpr size_t kSerializationSize = 4 * sizeof(int);
+    if (serialData == nullptr || serialLength < kSerializationSize) {
+        return nullptr;
+    }
     return new BEVPoolV2Plugin(serialData, serialLength);
 }
 
@@ -233,7 +334,7 @@ const char* BEVPoolV2PluginCreator::getPluginNamespace() const noexcept {
     return mNamespace.c_str();
 }
 
-// Explicit initialization function for loading .so
+// Explicit initialization function
 extern "C" {
     __attribute__((visibility("default")))
     void forceInitBEVPoolV2Plugin() {

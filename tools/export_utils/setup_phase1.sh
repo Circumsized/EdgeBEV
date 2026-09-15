@@ -11,18 +11,18 @@ echo "=========================================="
 # 1. 检查 Conda 环境
 if [ -z "$CONDA_DEFAULT_ENV" ]; then
     echo "❌ 请先激活 Conda 环境:"
-    echo "   conda activate bevfusion_mqbench"
+    echo "   conda activate edgebev_research"
     exit 1
 fi
 
 echo "✅ Conda 环境: $CONDA_DEFAULT_ENV"
 
 # 2. 设置环境变量
-export LD_LIBRARY_PATH=/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=<TRT_ROOT>/lib:$LD_LIBRARY_PATH
 echo "✅ LD_LIBRARY_PATH 已设置"
 
 # 3. 切换到项目目录
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 echo "✅ 工作目录: $(pwd)"
 
 # 4. 验证 Python 导入
@@ -104,7 +104,7 @@ echo "硬件          : NVIDIA RTX 3090 (Ampere, SM 8.6)"
 echo "CUDA (nvcc)   : 11.8"
 echo "CUDA (PyTorch): $(torch.version.cuda)"
 echo "TRT Python API: $(python -c 'import tensorrt as trt; print(trt.__version__)')  (conda env: $CONDA_DEFAULT_ENV)"
-echo "TRT C++ SDK   : 8.6.1  (/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6)"
+echo "TRT C++ SDK   : 8.6.1  (<TRT_ROOT>)"
 echo "工作目录      : $(pwd)"
 echo "Conda 环境    : $CONDA_DEFAULT_ENV"
 

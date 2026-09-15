@@ -1,4 +1,4 @@
-# BEVFusion 全模块 INT8 量化部署 — 总交接文档（2026-04-05）
+# EdgeBEV 全模块 INT8 量化部署 — 总交接文档（2026-04-05）
 
 > 本文档整合了 Phase 1 ~ Phase 9 Part A 的全部 Handoff 与总结文档，是后续工作的**单一入口**。
 > 若你是新接手的 Agent，**请先完整阅读本文档 1~6 节**，再动手改代码。
@@ -42,6 +42,37 @@
 
 输入 → [Camera 分支] / [LiDAR 分支] → Fuser → Decoder → Head → 3D Bboxes
 
+```mermaid
+flowchart TB
+    IN["输入：6 路图像 + 点云"]
+
+    subgraph CAM["Camera 分支"]
+        direction LR
+        C1["6路图像<br/>[1,6,3,256,704]"] --> C2["swin_int8<br/>(TRT INT8)"]
+        C2 --> C3["camera_neck_int8<br/>(TRT INT8)"]
+        C3 --> C4["vtransform_depthnet_int8<br/>(TRT INT8)"]
+        C4 --> C5["bev_pool_v2<br/>(CUDA kernel/Plugin)"]
+        C5 --> C6["Camera BEV<br/>[1,80,180,180]"]
+    end
+
+    subgraph LID["LiDAR 分支"]
+        direction LR
+        L1["点云 [N,5]"] --> L2["Voxelization<br/>(CUDA ext)"]
+        L2 --> L3["TVSparseEncoder /<br/>SparseEncoder23"]
+        L3 --> L4["LiDAR BEV<br/>[1,256,180,180]<br/>FP16 0.7039 | INT8 0.6893"]
+    end
+
+    C6 --> F["fuser_decoder_int8<br/>(TRT INT8)"]
+    L4 --> F
+    F --> FN["neck [1,512,180,180]"]
+    FN --> H["transfusion_head_int8<br/>(TRT INT8)"]
+    H --> OUT["最终检测结果<br/>3D BBoxes"]
+
+    style CAM fill:#eff6ff,stroke:#3b82f6
+    style LID fill:#f0fdf4,stroke:#22c55e
+    style OUT fill:#fef3c7,stroke:#f59e0b
+```
+
 ```
 Camera 分支：
   6路图像 [1,6,3,256,704]
@@ -72,7 +103,7 @@ Head：
 | Camera Neck | TRT Engine | INT8 | GeneralizedLSSFPN 导出 |
 | Depthnet | TRT Engine | INT8 | 含 `bev_pool_v2` Plugin 接口 |
 | bev_pool_v2 | CUDA kernel / Plugin | FP16 | 预计算 rank/interval 索引 |
-| Voxelization | CUDA ext (`voxel_layer`) | FP32 | `build_sp39/` 编译产物 |
+| Voxelization | CUDA ext (`voxel_layer`) | FP32 | `build_deploy/` 编译产物 |
 | LiDAR backbone | spconv 2.3 (PyTorch/TV) | FP16/INT8 Log2 | TV 路径 = 去 PyTorch |
 | Fuser+Decoder | TRT Engine | INT8/FP16 | `fuser_decoder_int8/fp16` |
 | TransFusionHead | TRT Engine | INT8 | `argsort` → `topk` 修复后导出 |
@@ -81,7 +112,7 @@ Head：
 
 ## 3. 双环境体系（Agent 必须牢记）
 
-### 3.1 环境 1：bevfusion_mqbench（研究/校准/导出）
+### 3.1 环境 1：edgebev_research（研究/校准/导出）
 
 ```
 Python 3.8 + PyTorch 1.10.2 + spconv 2.1.25 + mmcv 1.4.0 + MQBench 0.0.6
@@ -94,7 +125,7 @@ CUDA: 11.3 (PyTorch) / 11.8 (nvcc)
 ### 3.2 环境 2：spconv23_deploy（独立推理/部署）
 
 ```
-路径：/media/yellowstone/data2/CYL/spconv23_deploy
+路径：<REMOTE_ROOT>/envs/spconv23_deploy
 Python 3.9 + PyTorch 2.0.1 + spconv 2.3.8 + mmcv 1.7.2 + mmdet 2.20.0
 TensorRT Python API: 10.15.1.29
 CUDA: 11.8
@@ -104,9 +135,9 @@ CUDA: 11.8
 
 ### 3.3 为什么有两个环境？
 
-- `bevfusion_mqbench` 有 MQBench（只支持 PyTorch 1.10 / Python 3.8），用于量化研究和 ONNX 导出。
+- `edgebev_research` 有 MQBench（只支持 PyTorch 1.10 / Python 3.8），用于量化研究和 ONNX 导出。
 - `spconv23_deploy` 是独立部署环境，Python 3.9 + spconv 2.3，兼容 TRT 10.15。
-- **所有后续部署工作都在 `spconv23_deploy` 进行。** 但 ONNX 导出和 PTQ 校准若需修改 MQBench 逻辑，仍需回 `bevfusion_mqbench`。
+- **所有后续部署工作都在 `spconv23_deploy` 进行。** 但 ONNX 导出和 PTQ 校准若需修改 MQBench 逻辑，仍需回 `edgebev_research`。
 
 ---
 
@@ -137,7 +168,7 @@ CUDA: 11.8
 |------|------|
 | `tools/quant_ptq_minmax.py` | **核心 PTQ 工具**（MinMax / KL / Log2） |
 | `tools/test.py` | FP32 基线评估 |
-| `tools/build_cuda_ext.py` | 在 `spconv23_deploy` 中编译 `build_sp39/` 下的 CUDA 扩展 |
+| `tools/build_cuda_ext.py` | 在 `spconv23_deploy` 中编译 `build_deploy/` 下的 CUDA 扩展 |
 
 ### 4.4 配置文件与预训练权重
 
@@ -180,7 +211,7 @@ SwinTransformer 静态化与 ONNX 导出。核心产出：
 - `transfusion_head_fp16` 引擎构建（修复 `argsort` → `topk`）
 
 ### Phase 5（2026-03-29）
-端到端混合 pipeline（`tools/trt_infer.py`，`bevfusion_mqbench` 环境）：
+端到端混合 pipeline（`tools/trt_infer.py`，`edgebev_research` 环境）：
 - Version A (W8A16): NDS 0.7144
 - Version B (INT8): NDS 0.7102
 
@@ -191,7 +222,7 @@ Camera Neck + TransFusionHead 也转为 TRT，全 TRT pipeline 打通。结果�
 ### Phase 7（2026-03-30 ~ 04-05）
 - 迁移到 `spconv23_deploy` 环境
 - 新建 `trt_infer_standalone.py`
-- JIT 编译 cpython-39 CUDA 扩展到 `build_sp39/`
+- JIT 编译 cpython-39 CUDA 扩展到 `build_deploy/`
 - 修复 `WeightFakeQuantize` scale shape `[1] → [out_channels]`
 - PyTorch INT8 NDS = **0.6893**（控制组验证通过）
 
@@ -269,7 +300,7 @@ spconv 2.3 weight shape：`[out,k,k,k,in]`
 
 ### TV INT8 冒烟测试（单样本）
 ```bash
-conda activate /media/yellowstone/data2/CYL/spconv23_deploy
+conda activate <REMOTE_ROOT>/envs/spconv23_deploy
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 \
 python -u tools/trt_infer_standalone.py \
     --config configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
@@ -285,7 +316,7 @@ python -u tools/trt_infer_standalone.py \
 
 ### TV INT8 完整 NDS 评估
 ```bash
-conda activate /media/yellowstone/data2/CYL/spconv23_deploy
+conda activate <REMOTE_ROOT>/envs/spconv23_deploy
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 \
 python -u tools/trt_infer_standalone.py \
     --config configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \
@@ -303,7 +334,7 @@ python -u tools/trt_infer_standalone.py \
 ### PyTorch INT8 控制组（不加 `--no-torch-lidar`）
 用于快速验证 PTQ checkpoint 本身是否正常：
 ```bash
-conda activate /media/yellowstone/data2/CYL/spconv23_deploy
+conda activate <REMOTE_ROOT>/envs/spconv23_deploy
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 \
 python -u tools/trt_infer_standalone.py ... --lidar-quant int8 --ptq-ckpt pretrained/ptq_minmax_model.pth
 ```

@@ -7,8 +7,8 @@
 ## 0. 统一环境与公共变量
 
 ```bash
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev_research
 mkdir -p logs runs
 
 CFG=configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml
@@ -18,6 +18,23 @@ CKPT=pretrained/bevfusion-det.pth
 ---
 
 ## 1. 模块间消融（你列出的主线组合）
+
+```mermaid
+flowchart LR
+    subgraph VT["vtransform 量化方案"]
+        direction TB
+        V1["MinMax<br/>−12.6% ❌"] --> V2["KL<br/>−0.5% ✅"]
+    end
+    subgraph LD["lidar 量化方案"]
+        direction TB
+        L1["MinMax<br/>−18.5% ❌"] --> L2["KL<br/>−18.5% ❌"] --> L3["Log2<br/>−3.1% ✅"]
+    end
+    V2 --> BEST["A3 最优组合<br/>NDS 0.6875 (−2.7%)"]
+    L3 --> BEST
+    style V2 fill:#dcfce7,stroke:#22c55e
+    style L3 fill:#dcfce7,stroke:#22c55e
+    style BEST fill:#fef3c7,stroke:#f59e0b,stroke-width:2px
+```
 
 | ID | 组合 | 状态 | 现有精度（NDS/mAP） | 备注 |
 |---|---|---|---|---|
@@ -310,14 +327,14 @@ wait
 ### 5.1 跑三组评估
 
 ```bash
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 mkdir -p runs/compare_triplet logs
 
 CFG=configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml
 CKPT=pretrained/bevfusion-det.pth
 
 # (1) FP32 基线（全量 val）
-conda activate bevfusion_mqbench
+conda activate edgebev_research
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 \
 python tools/test.py $CFG $CKPT --eval bbox \
   2>&1 | tee logs/compare_fp32_all_metrics.log
@@ -334,7 +351,7 @@ python tools/quant_ptq_minmax.py $CFG \
   2>&1 | tee logs/compare_ptq88_kl_log2_all_metrics.log
 
 # (3) TRT 8/8（TV lidar INT8，全量 val）
-conda activate /media/yellowstone/data2/CYL/spconv23_deploy
+conda activate <REMOTE_ROOT>/envs/spconv23_deploy
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3 \
 python -u tools/trt_infer_standalone.py \
   --config $CFG \
@@ -355,7 +372,7 @@ cp -f trt_standalone_eval.json runs/compare_triplet/trt88_metrics_raw.json
 ### 5.2 从日志/JSON导出三份“全指标”文件
 
 ```bash
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 python - <<'PY'
 import json
 import math
@@ -401,7 +418,7 @@ PY
 ### 5.3 生成“所有指标”对比表（CSV + Markdown）
 
 ```bash
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 python - <<'PY'
 import csv
 import json
@@ -473,8 +490,8 @@ nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader,n
 ### 6.1 BRECQ 全量跑（4 卡 DDP via torchrun）
 
 ```bash
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-conda activate bevfusion_mqbench
+cd <REMOTE_ROOT>/EdgeBEV
+conda activate edgebev_research
 mkdir -p runs/compare_triplet logs
 
 CFG=configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml
@@ -508,7 +525,7 @@ torchrun --nproc_per_node=4 --standalone \
 把 §5.2 / §5.3 的 Python 脚本扩展加一列 `brecq88`：
 
 ```bash
-cd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
+cd <REMOTE_ROOT>/EdgeBEV
 python - <<'PY'
 import json, math, csv
 from pathlib import Path

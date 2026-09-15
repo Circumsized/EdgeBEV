@@ -1,19 +1,93 @@
 import os
+import re
+from typing import Iterable, List, Optional, Sequence
 
 import torch
 from setuptools import find_packages, setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 
 
+_DEFAULT_CUDA_ARCHES = ("7.0", "7.5", "8.0", "8.6", "8.7", "8.9")
+_ARCH_TOKEN_RE = re.compile(r"^(?:sm_|compute_)?(?P<major>\d+)(?:\.(?P<minor>\d+)|(?P<minor_compact>\d+))$")
+_PTX_SUFFIX_RE = re.compile(r"\+\s*ptx$", re.IGNORECASE)
+
+
+def _normalize_arch_token(token: str):
+    """Return ``(arch, with_ptx)`` or ``None`` for an invalid token."""
+    token = token.strip().lower().replace("-", "")
+    with_ptx = _PTX_SUFFIX_RE.search(token) is not None
+    token = _PTX_SUFFIX_RE.sub("", token)
+    match = _ARCH_TOKEN_RE.match(token)
+    if match is None:
+        return None
+    major = int(match.group("major"))
+    minor = match.group("minor") or match.group("minor_compact")
+    if minor is None or not minor.isdigit() or len(minor) != 1:
+        return None
+    return f"{major}.{int(minor)}", with_ptx
+
+
+def _configured_cuda_arches():
+    configured = os.getenv("BEVFUSION_CUDA_ARCH_LIST") or os.getenv("TORCH_CUDA_ARCH_LIST")
+    if configured:
+        tokens = [t for t in re.split(r"[;,\s]+", configured) if t.strip()]
+        seen = set()
+        arches = []
+        for token in tokens:
+            parsed = _normalize_arch_token(token)
+            if parsed is None or parsed[0] in seen:
+                continue
+            seen.add(parsed[0])
+            arches.append(parsed)
+    elif torch.cuda.is_available():
+        pairs = {
+            torch.cuda.get_device_capability(index)
+            for index in range(torch.cuda.device_count())
+        }
+        arches = [(f"{major}.{minor}", False) for major, minor in pairs]
+    else:
+        arches = [(arch, False) for arch in _DEFAULT_CUDA_ARCHES]
+
+    if not arches:
+        raise RuntimeError(
+            "No valid CUDA architectures found. Set BEVFUSION_CUDA_ARCH_LIST, "
+            "for example: 8.6"
+        )
+    return arches
+
+
+def _cuda_arch_flags(arches):
+    flags = []
+    for arch, with_ptx in arches:
+        code = arch.replace(".", "")
+        flags.append(f"-gencode=arch=compute_{code},code=sm_{code}")
+        if with_ptx:
+            flags.append(f"-gencode=arch=compute_{code},code=compute_{code}")
+    return flags
+
+
 def make_cuda_ext(
-    name, module, sources, sources_cuda=[], extra_args=[], extra_include_path=[]
+    name,
+    module,
+    sources,
+    sources_cuda=None,
+    extra_args=None,
+    extra_include_path=None,
 ):
+    sources = list(sources)
+    sources_cuda = list(sources_cuda or [])
+    extra_args = list(extra_args or [])
+    extra_include_path = list(extra_include_path or [])
 
     define_macros = []
-    extra_compile_args = {"cxx": [] + extra_args}
+    extra_compile_args = {"cxx": extra_args}
+    force_cuda = os.getenv("FORCE_CUDA", "0") == "1"
+    force_rocm = os.getenv("FORCE_ROCM", "0") == "1"
+    has_cuda = torch.cuda.is_available() and torch.version.cuda is not None
+    has_rocm = torch.cuda.is_available() and torch.version.hip is not None
 
-    if (torch.cuda.is_available() and torch.version.cuda is not None) or os.getenv("FORCE_CUDA", "0") == "1":
-        define_macros += [("WITH_CUDA", None)]
+    if has_cuda or force_cuda:
+        define_macros.append(("WITH_CUDA", None))
         extension = CUDAExtension
         extra_compile_args["nvcc"] = extra_args + [
             "-D__CUDA_NO_HALF_OPERATORS__",
@@ -21,28 +95,24 @@ def make_cuda_ext(
             "-D__CUDA_NO_HALF2_OPERATORS__",
             "-allow-unsupported-compiler",
             "-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH",
-            "-gencode=arch=compute_70,code=sm_70",
-            "-gencode=arch=compute_75,code=sm_75",
-            "-gencode=arch=compute_80,code=sm_80",
-            "-gencode=arch=compute_86,code=sm_86",
-        ]
-        sources += sources_cuda
-    elif (torch.cuda.is_available() and torch.version.hip is not None) or os.getenv("FORCE_ROCM", "0") == 1:
-        define_macros += [("WITH_ROCM", None)]
+        ] + _cuda_arch_flags(_configured_cuda_arches())
+        sources.extend(sources_cuda)
+    elif has_rocm or force_rocm:
+        define_macros.append(("WITH_ROCM", None))
         extension = CUDAExtension
         extra_compile_args["hipcc"] = extra_args + [
             "-D__HIP_NO_HALF_OPERATORS__",
             "-D__HIP_NO_HALF_CONVERSIONS__",
             "-D__HIP_NO_HALF2_OPERATORS__",
         ]
-        sources += sources_cuda
+        sources.extend(sources_cuda)
     else:
         print("Compiling {} without CUDA".format(name))
         extension = CppExtension
 
     return extension(
         name="{}.{}".format(module, name),
-        sources=[os.path.join(*module.split("."), p) for p in sources],
+        sources=[os.path.join(*module.split("."), path) for path in sources],
         include_dirs=extra_include_path,
         define_macros=define_macros,
         extra_compile_args=extra_compile_args,
@@ -57,13 +127,13 @@ if __name__ == "__main__":
         package_data={"mmdet3d.ops": ["*/*.so"]},
         classifiers=[
             "Development Status :: 4 - Beta",
-            "License :: OSI Approved :: Apache Software License",
             "Operating System :: OS Independent",
             "Programming Language :: Python :: 3",
-            "Programming Language :: Python :: 3.6",
-            "Programming Language :: Python :: 3.7",
+            "Programming Language :: Python :: 3.8",
+            "Programming Language :: Python :: 3.9",
+            "Programming Language :: Python :: 3.10",
+            "Programming Language :: Python :: 3.11",
         ],
-        license="Apache License 2.0",
         ext_modules=[
             make_cuda_ext(
                 name="sparse_conv_ext",

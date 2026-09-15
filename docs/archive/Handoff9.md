@@ -92,7 +92,7 @@ docs/Handoff9.md                    ← 本文档
 
 **单样本冒烟测试（TV INT8）**：
 ```bash
-conda activate /media/yellowstone/data2/CYL/spconv23_deploy
+conda activate <REMOTE_ROOT>/envs/spconv23_deploy
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 \
 python -u tools/trt_infer_standalone.py \
     --config configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml \

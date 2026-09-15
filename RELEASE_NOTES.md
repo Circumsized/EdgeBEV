@@ -1,8 +1,8 @@
-# BEVFusion + MQBench v1.0 发布说明
+# EdgeBEV v1.0 发布说明
 
 ## 🎉 版本亮点
 
-**首个实现 BEVFusion 8/8 全模块 INT8 量化的开源项目**
+**实现 BEV 感知模型 8/8 全模块 INT8 量化的边缘部署框架**
 
 - ✅ **精度损失仅 −2.7%**（NDS 0.6875 vs FP32 0.7069）
 - ✅ **100% 参数覆盖率**（全部 40.9M 参数）
@@ -151,12 +151,11 @@ python tools/quant_ptq_minmax.py \
 如果您使用了本项目的代码或方法，请引用：
 
 ```bibtex
-@software{bevfusion_mqbench_v1,
-  title={{BEVFusion}+{MQBench}: Full Model INT8 Post-Training Quantization},
-  author={Research Group},
+@software{edgebev_v1,
+  title={{EdgeBEV}: Edge-Deployable BEV Perception with Full-Model INT8 Post-Training Quantization},
+  author={EdgeBEV Contributors},
   year={2026},
   version={1.0},
-  url={https://github.com/Yulong-Cauli/BEVFusion_with_MQBench},
   note={8/8 modules quantized, NDS 0.6875 (-2.7\% vs FP32)}
 }
 ```
@@ -165,17 +164,16 @@ python tools/quant_ptq_minmax.py \
 
 ## 📧 联系方式
 
-- **GitHub**：https://github.com/Yulong-Cauli/BEVFusion_with_MQBench
-- **Issues**：https://github.com/Yulong-Cauli/BEVFusion_with_MQBench/issues
+- **Issues**：请在项目仓库中提交 Issue
 
 ---
 
 **v1.0 发布总结**：
 
-✅ **研究目标完成**：实现 BEVFusion 8/8 全模块 INT8 量化
+✅ **研究目标完成**：实现 8/8 全模块 INT8 量化
 ✅ **精度目标达成**：精度损失仅 −2.7%，远超 MinMax 基线（−35.5%）
 ✅ **创新算法验证**：Log2 + KL Observer 方法有效且可复现
 ✅ **完整文档交付**：技术报告、实验记录、部署手册齐全
-✅ **版本管理规范**：v1.0 标签，代码已提交到 GitHub
+✅ **版本管理规范**：v1.0 标签
 
-🎉 **这是 BEVFusion 量化研究的重要里程碑！**
+🎉 **这是 BEV 量化与边缘部署的重要里程碑！**

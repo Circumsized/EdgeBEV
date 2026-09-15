@@ -8,7 +8,7 @@ loads FP32 weights from the BEVFusion checkpoint, and runs inference.
 The output is saved as a .pt file for verification against PyTorch (spconv 2.1) output.
 
 Usage:
-    conda run --prefix /media/yellowstone/data2/CYL/spconv23_deploy python \
+    conda run --prefix <REMOTE_ROOT>/envs/spconv23_deploy python \
         tools/export_utils/build_lidar_spconv23.py \
         --ckpt pretrained/bevfusion-det.pth \
         --verify-dir lidar_verify_tensors \

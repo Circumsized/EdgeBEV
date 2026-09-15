@@ -18,7 +18,7 @@ import numpy as np
 
 # Pre-load the original extension
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.join(ROOT, "build_sp39"))
+sys.path.insert(0, os.path.join(ROOT, "build_deploy"))
 import iou3d_cuda as _iou3d_cuda
 
 from iou3d_wrapper import nms_gpu

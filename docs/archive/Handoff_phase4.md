@@ -1,4 +1,4 @@
-## BEVFusion 全模块 TRT 部署 — 工作交接（2026-03-29）
+## EdgeBEV 全模块 TRT 部署 — 工作交接（2026-03-29）
 
 ### 总体进度
 
@@ -24,7 +24,7 @@
 
 #### 2. spconv 2.3 部署环境
 
-- 新建 conda 环境：`/media/yellowstone/data2/CYL/spconv23_deploy`
+- 新建 conda 环境：`<REMOTE_ROOT>/envs/spconv23_deploy`
 - Python 3.9 + PyTorch 2.0.1+cu118 + spconv 2.3.8 + TensorRT 8.6.1
 - `build_lidar_spconv23.py`：用纯 spconv 2.3 API 重建 SparseEncoder
 - 权重加载：自动处理 spconv 2.1→2.3 weight shape 转换（`[k,k,k,in,out]` → `[out,k,k,k,in]`）
@@ -80,13 +80,13 @@
 
 ```
 统一部署环境（推荐用这个跑端到端）:
-  Conda prefix: /media/yellowstone/data2/CYL/spconv23_deploy
+  Conda prefix: <REMOTE_ROOT>/envs/spconv23_deploy
   Python 3.9 + PyTorch 2.0.1+cu118 + spconv 2.3.8 + TensorRT 8.6.1
-  激活: conda run --prefix /media/yellowstone/data2/CYL/spconv23_deploy --cwd /media/yellowstone/data2/CYL/BEVFusion_with_MQBench
-  TRT lib: export LD_LIBRARY_PATH=/media/yellowstone/databig2/gzj/tensorrt/TensorRT-8.6.1.6/lib:$LD_LIBRARY_PATH
+  激活: conda run --prefix <REMOTE_ROOT>/envs/spconv23_deploy --cwd <REMOTE_ROOT>/EdgeBEV
+  TRT lib: export LD_LIBRARY_PATH=<TRT_ROOT>/lib:$LD_LIBRARY_PATH
 
 研究环境（PTQ 量化、NDS 评估）:
-  Conda: bevfusion_mqbench
+  Conda: edgebev_research
   Python 3.8 + PyTorch 1.10.2 + spconv 2.1.25 + MQBench + TRT Python 10.15
 
 通用:
@@ -138,4 +138,4 @@ pretrained/ptq_minmax_model.pth               — PTQ 8/8 全量化权重
 2. **spconv weight shape 转换**：2.1 是 `[k,k,k,in,out]`，2.3 是 `[out,k,k,k,in]`，需要 `permute(4,0,1,2,3)`
 3. **MQBench FakeQuant → Q/DQ**：需要三步 symbolic 注册（ATen 域 + mqbench custom + PerChannel override）
 4. **PTQ checkpoint 加载**：FakeQuant scale/zero_point shape 不匹配，需要 resize workaround（见 export_vtransform.py 第 276-308 行）
-5. **TRT Python API 版本**：bevfusion_mqbench 有 10.15，spconv23_deploy 有 8.6.1（从本地 wheel 安装）
+5. **TRT Python API 版本**：edgebev_research 有 10.15，spconv23_deploy 有 8.6.1（从本地 wheel 安装）
