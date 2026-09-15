@@ -80,13 +80,13 @@ flowchart LR
 | 信息论概念 | 量化中的对应物 |
 |-----------|--------------|
 | 信源（source） | FP32 权重 / 激活张量 |
-| 码字（codeword） | INT8 整数值 $q$ |
-| 码本（codebook） | 量化格点 $\{q\cdot s\}$（均匀）或 $\{2^{q+\beta}\}$（对数） |
-| 码率（rate） | 位宽 $b=8$ bit/元素 |
-| 失真（distortion） | 量化误差 $\lvert\hat{x}-x\rvert$ 或导致的 NDS 下降 |
+| 码字（codeword） | INT8 整数值 q |
+| 码本（codebook） | 量化格点 {q·s}（均匀）或 {2^(q+β)}（对数） |
+| 码率（rate） | 位宽 b = 8 bit/元素 |
+| 失真（distortion） | 量化误差 &#124;x̂ − x&#124; 或导致的 NDS 下降 |
 | 编码器设计目标 | **在给定码率下最小化失真**（率-失真理论） |
 
-**率-失真（Rate–Distortion）视角**：Shannon 的理论告诉我们，给定失真上限 $D$，存在一个最小码率 $R(D)$。
+**率-失真（Rate–Distortion）视角**：Shannon 的理论告诉我们，给定失真上限 D，存在一个最小码率 R(D)。
 本项目的实践正是这条曲线上的一个工作点——
 
 ```
@@ -109,19 +109,19 @@ flowchart LR
 
 本项目最核心的算法（KL Observer）正是**信息论量的直接使用**。回顾 KL 散度的定义：
 
-$$
-D_{\text{KL}}(P \,\|\, Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)} = H(P,Q) - H(P)
-$$
+```text
+   D_KL(P ‖ Q) = Σ_x  P(x) · log( P(x) / Q(x) )  =  H(P, Q) − H(P)
+```
 
-**信息论解读**：$D_{\text{KL}}(P\|Q)$ 度量"用编码方案 $Q$ 去编码真实信源 $P$ 时，相对最优编码额外付出的比特数"（单位：nat/bit）。
-$H(P)$ 是该信源不可再压缩的**信息熵下界**，$H(P,Q)$ 是实际编码的代价。因此——
+**信息论解读**：`D_KL(P ‖ Q)` 度量"用编码方案 Q 去编码真实信源 P 时，相对最优编码额外付出的比特数"（单位：nat/bit）。
+`H(P)` 是该信源不可再压缩的**信息熵下界**，`H(P, Q)` 是实际编码的代价。因此——
 
-$$
-\min_{Q} D_{\text{KL}}(P \,\|\, Q) \iff \min_Q H(P,Q) \iff \text{寻找该信源的最短平均码长}
-$$
+```text
+   min_Q  D_KL(P ‖ Q)   ⇔   min_Q  H(P, Q)   ⇔   寻找该信源的最短平均码长
+```
 
 **这正是"压缩即智能"在量化场景下的数学化身**：我们不是随意截断数值范围，而是**寻找使编码代价最小的量化方案**。
-Sutskever 所说的"最短程序"，在此具体化为"使 $D_{KL}$ 最小的量化阈值 $T$"。
+Sutskever 所说的"最短程序"，在此具体化为"使 D_KL 最小的量化阈值 T"。
 
 ```mermaid
 flowchart TD
@@ -174,20 +174,22 @@ flowchart TD
 
 ### 1. 量化基础
 
-**均匀（线性）量化**将浮点值 $x$ 映射到 $b$ 位有符号整数域 $[-2^{b-1}+1,\ 2^{b-1}-1]$：
+**均匀（线性）量化**将浮点值 x 映射到 b 位有符号整数域 [−2^(b−1)+1, 2^(b−1)−1]：
 
-$$
-s = \frac{\max(|x|)}{2^{b-1}-1}, \quad q = \text{clamp}\left(\left\lfloor \frac{x}{s} \right\rceil, \; -2^{b-1}+1, \; 2^{b-1}-1\right), \quad \hat{x} = q \cdot s
-$$
+```text
+   s = max(|x|) / (2^(b−1) − 1)
+   q = clamp( round(x / s),  −2^(b−1)+1,  2^(b−1)−1 )
+   x̂ = q · s
+```
 
-其中 $s$ 为量化步长（scale），$\lfloor \cdot \rceil$ 表示四舍五入。**对称量化的关键是：步长由张量的绝对最大值决定**。这带来一个结构性缺陷——
+其中 s 为量化步长（scale），round(·) 表示四舍五入。**对称量化的关键是：步长由张量的绝对最大值决定**。这带来一个结构性缺陷——
 
-> 若激活中存在极少数离群大值（outlier），$\max(|x|)$ 会被拉大，导致量化步长 $s$ 变大，
+> 若激活中存在极少数离群大值（outlier），max(|x|) 会被拉大，导致量化步长 s 变大，
 > 主体分布的可用量化级别急剧减少，从而产生巨大的量化误差。
 
 BEVFusion 的 vtransform 与 lidar 分支恰恰是这类"重尾 / 稀疏"分布的典型。
 
-**分块（granularity）**：量化还分 *per-tensor*（整个张量共享一组 $(s,z)$）与 *per-channel*（每个通道独立）。
+**分块（granularity）**：量化还分 *per-tensor*（整个张量共享一组 (s, z)）与 *per-channel*（每个通道独立）。
 粒度越细，对通道间差异的适应性越强，但需要更多存储；本项目中 per-tensor 在 lidar 上反而更优（详见 [设计权衡](#设计权衡)）。
 
 ### 2. KL 散度校准 — vtransform 瓶颈
@@ -195,8 +197,8 @@ BEVFusion 的 vtransform 与 lidar 分支恰恰是这类"重尾 / 稀疏"分布�
 **问题诊断**：vtransform 的 `bev_pool` 输出 BEV 特征在空间上极度稀疏（近似 one-hot），
 激活直方图在零点处形成**尖锐峰值**。用 MinMax 全范围映射时，实测 **98.3% 的 INT8 量化级别被浪费**在几乎无激活的区间。
 
-**解决思路**：不等价地"相信最大值"，而是**主动截断**到区间 $[-T,\ T]$，并通过最小化量化前后分布的
-KL 散度来选择最优的 $T$。这正是 TensorRT `IInt8EntropyCalibrator2` 的思想。
+**解决思路**：不等价地"相信最大值"，而是**主动截断**到区间 [−T, T]，并通过最小化量化前后分布的
+KL 散度来选择最优的 T。这正是 TensorRT `IInt8EntropyCalibrator2` 的思想。
 
 **算法流程**（对一个张量的 2048-bin 直方图）：
 
@@ -213,26 +215,22 @@ flowchart TD
     H --> I["计算最终 scale<br/>s = T / (2^(b-1) − 1)"]
 ```
 
-参考分布 $P^{(i)}$（截断 + 边界 clip）与量化重分布 $\tilde{Q}^{(i)}$（粗量化后均匀展开）定义为：
+参考分布 P^(i)（截断 + 边界 clip）与量化重分布 Q̃^(i)（粗量化后均匀展开）定义为：
 
-$$
-P_j^{(i)} =
-\begin{cases}
-\text{hist}[j], & 0 \le j < i-1 \\
-\sum_{t=i-1}^{N-1} \text{hist}[t], & j = i-1
-\end{cases}
-$$
+```text
+              ┌ hist[j],                0 <= j < i-1
+   P_j^(i) = ─┤
+              └ Σ_{t=i-1..N-1} hist[t],  j = i-1
 
-$$
-\tilde{Q}_j^{(i)} = \frac{1}{L_k}\sum_{t=\text{start}_k}^{\text{end}_k} P_t^{(i)}, \quad k = \left\lfloor \frac{jM}{i} \right\rfloor
-$$
+   Q̃_j^(i) = ( 1 / L_k ) · Σ_{t=start_k..end_k} P_t^(i),   k = floor( j·M / i )
+```
 
-其中将 $[0,i-1]$ 均匀划分为 $M$ 个粗粒度 bin，$L_k = \text{end}_k - \text{start}_k + 1$。最终选取
+其中将 [0, i-1] 均匀划分为 M 个粗粒度 bin，L_k = end_k - start_k + 1。最终选取
 
-$$
-i^{*} = \arg\min_{i \in [M,\,N]} D_{\text{KL}}\left(P^{(i)} \,\|\, \tilde{Q}^{(i)}\right), \quad
-T = \text{bin\_width} \cdot i^{*}
-$$
+```text
+   i* = argmin_{i ∈ [M, N]}  D_KL( P^(i) ‖ Q̃^(i) )
+   T  = bin_width · i*
+```
 
 **为什么有效**：它直接优化"量化后分布"与"真实分布"的信息损失，而非盲目覆盖极值。
 截断掉的是对分布形态贡献极小的尾部，却为主体换回了大量可用量化级别。
@@ -254,21 +252,19 @@ $$
 
 **解决思路**：改用**对数域量化**，使相邻量化格点在以 2 为底的指数域上均匀，从而获得近似**恒定的相对误差**：
 
-$$
-q = \text{clamp}\left(\left\lfloor \log_2(|x|) - \beta \right\rceil, \; -127, \; 127\right), \quad
-\hat{x} = \text{sign}(x) \cdot 2^{\,q + \beta}
-$$
+```text
+   q = clamp( round( log2(|x|) − β ),  −127,  127 )
+   x̂ = sign(x) · 2^( q + β )
+```
 
-其中 $\beta$ 是对数域基准（base），由校准数据非零激活分布的**低百分位**（默认第 5 百分位）估计，使动态范围对齐 INT8 格点。
-零值通过阈值 $\varepsilon$ 精确还原：
+其中 β 是对数域基准（base），由校准数据非零激活分布的**低百分位**（默认第 5 百分位）估计，使动态范围对齐 INT8 格点。
+零值通过阈值 ε 精确还原：
 
-$$
-\hat{x} =
-\begin{cases}
-0, & |x| < \varepsilon \\
-\text{sign}(x) \cdot 2^{q+\beta}, & \text{otherwise}
-\end{cases}
-$$
+```text
+          ┌ 0,                    |x| < ε
+   x̂  = ─┤
+          └ sign(x) · 2^(q+β),    otherwise
+```
 
 **相对误差对比**：
 
@@ -277,8 +273,8 @@ $$
 | 均匀 INT8 | 绝对步长恒定 | 小幅值处 **≫ 100%** | 均匀 / 高斯 |
 | **Log2** | 相邻格点比例恒为 2 | **恒定 ≈ 41%** | 幂律 / 拉普拉斯 |
 
-> **数学直觉**：均匀量化保证 $\lvert\hat{x}-x\rvert \le s/2$（绝对误差有界），
-> 但对 $x \to 0$ 相对误差发散；对数量化则保证 $\lvert\hat{x}/x - 1\rvert \le 1-\frac{1}{\sqrt{2}}$ 量级（相对误差有界），
+> **数学直觉**：均匀量化保证 |x̂ − x| ≤ s/2（绝对误差有界），
+> 但对 x → 0 相对误差发散；对数量化则保证 |x̂/x − 1| ≤ 1 − 1/√2 量级（相对误差有界），
 > 恰好匹配稀疏激活"小值密集、大值稀少"的物理分布。
 
 **实测效果**：lidar 量化损失从 **−18.5% 收敛到 −3.1%（+15.4 pts）**。
