@@ -18,6 +18,9 @@ jobs:
       - name: Validate Python syntax
         run: |
           python -m py_compile setup.py tools/build_cuda_ext.py tools/build_trt_engine.py tools/engine_utils.py tools/quant_ptq_minmax.py tools/trt_infer_standalone.py tools/trt_infer_standalone_opt.py
+      - name: Install TOML parser (Python < 3.11 has no tomllib)
+        run: python -m pip install --quiet tomli
+
       - name: Validate project metadata
         run: |
           python - <<'PY'
